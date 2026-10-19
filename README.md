@@ -46,6 +46,17 @@ cp "Pokemon - FireRed Version (USA, Europe) (Rev 1).gba" ~/.local/share/pokedais
 
 Oppure passa il file: `./build/pokedaisy /percorso/al/gioco.gba`.
 
+## Avvio via SSH (stessa Wi‑Fi)
+
+Da un PC **nella stessa rete locale** dell’RG DS (un cloud agent non raggiunge `192.168.x.x`):
+
+```sh
+sudo apt install sshpass   # se manca
+SSHPASS='la-tua-password-ssh' ./scripts/run-on-rgds.sh
+```
+
+Default: `root@192.168.1.88:22`. Altrimenti `RGDS_HOST`, `RGDS_PORT`, `RGDS_USER`. Lo script copia i sorgenti, compila **sul dispositivo** (servono gcc/cmake) e lancia la demo sui due schermi.
+
 ## Installazione sull’RG DS (Linux)
 
 L’RG DS può avviare Linux da microSD senza cancellare Android (documentazione Anbernic). I due pannelli DSI 640×480 restano due output.
