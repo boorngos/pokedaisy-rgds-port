@@ -282,6 +282,19 @@ static void backup_save(const char* base, const char* savePath) {
     }
 }
 
+static void refresh_views(struct mCore* core, struct game_mem* mem, struct pd_game* game) {
+    // mGBA copies the ROM the first time something writes the cart (a 32MB
+    // image always trips this) and unmaps the old one. Icons and the map
+    // read that pointer, so it has to be fetched again after the frame.
+    mem->ewram = core->getMemoryBlock(core, 0x02, &mem->ewramSize);
+    mem->iwram = core->getMemoryBlock(core, 0x03, &mem->iwramSize);
+    size_t romSize = 0;
+    game->rom = core->getMemoryBlock(core, 0x08, &romSize);
+    game->romSize = game->rom ? romSize : 0;
+    mem->rom = game->rom;
+    mem->romSize = game->romSize;
+}
+
 static bool bus_read(void* ctx, uint32_t addr, void* out, size_t len) {
     const struct game_mem* m = ctx;
     if (addr >= 0x02000000 && addr - 0x02000000 + len <= m->ewramSize) {
@@ -630,17 +643,24 @@ static uint32_t keys_from_keyboard(const Uint8* k) {
     return keys;
 }
 
+static bool pad_labeled_nintendo(SDL_GameController* pad) {
+    const char* n = SDL_GameControllerName(pad);
+    return n && (strstr(n, "ANBERNIC") || strstr(n, "rk3568"));
+}
+
 static uint32_t keys_from_pad(SDL_GameController* pad, bool nintendo) {
     if (!pad) return 0;
     uint32_t keys = 0;
-    int south = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A);
-    int east = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B);
-    if (nintendo) {
-        if (east) keys |= GBA_A;
-        if (south) keys |= GBA_B;
+    int a = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A);
+    int b = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B);
+    /* SDL's standard map is positional (A = south). The RG DS map names the
+       buttons by the letter printed on them, so A is already the east button. */
+    if (nintendo && !pad_labeled_nintendo(pad)) {
+        if (b) keys |= GBA_A;
+        if (a) keys |= GBA_B;
     } else {
-        if (south) keys |= GBA_A;
-        if (east) keys |= GBA_B;
+        if (a) keys |= GBA_A;
+        if (b) keys |= GBA_B;
     }
     if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START)) keys |= GBA_START;
     if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK)) keys |= GBA_SELECT;
@@ -671,8 +691,31 @@ static bool pad_pressed(SDL_GameController* pad, SDL_GameControllerButton b) {
     return pad && SDL_GameControllerGetButton(pad, b);
 }
 
+static void install_anbernic_pad(void) {
+    /* Same letter map SimpleOS uses: b0 is the button labeled A. */
+    static const char bind[] =
+        "a:b0,b:b1,x:b3,y:b2,back:b6,guide:b8,start:b7,"
+        "leftstick:b9,rightstick:b12,leftshoulder:b4,rightshoulder:b5,"
+        "dpup:h0.1,dpleft:h0.8,dpdown:h0.4,dpright:h0.2,"
+        "leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b10,righttrigger:b11,"
+        "platform:Linux,";
+    char line[512];
+    snprintf(line, sizeof(line), "1900b655010000000100000000010000,ANBERNIC-rk3568-keys,%s", bind);
+    SDL_GameControllerAddMapping(line);
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        const char* nm = SDL_JoystickNameForIndex(i);
+        if (!nm || (!strstr(nm, "ANBERNIC") && !strstr(nm, "rk3568"))) continue;
+        char guid[64];
+        SDL_JoystickGUID g = SDL_JoystickGetDeviceGUID(i);
+        SDL_JoystickGetGUIDString(g, guid, sizeof(guid));
+        snprintf(line, sizeof(line), "%s,%s,%s", guid, nm, bind);
+        SDL_GameControllerAddMapping(line);
+    }
+}
+
 static void open_first_pad(void) {
     if (g.pad) return;
+    install_anbernic_pad();
     for (int i = 0; i < SDL_NumJoysticks(); i++) {
         if (SDL_IsGameController(i)) {
             g.pad = SDL_GameControllerOpen(i);
@@ -896,13 +939,7 @@ static bool run_game(const char* file) {
     core->reset(core);
 
     struct game_mem mem = { 0 };
-    mem.ewram = core->getMemoryBlock(core, 0x02, &mem.ewramSize);
-    mem.iwram = core->getMemoryBlock(core, 0x03, &mem.iwramSize);
-    size_t romSize = 0;
-    game.rom = core->getMemoryBlock(core, 0x08, &romSize);
-    game.romSize = game.rom ? romSize : 0;
-    mem.rom = game.rom;
-    mem.romSize = game.romSize;
+    refresh_views(core, &mem, &game);
     pd_romart_scan(&game);
     pd_map_art(&game);
 
@@ -956,6 +993,7 @@ static bool run_game(const char* file) {
             core->runFrame(core);
             frame++;
         }
+        refresh_views(core, &mem, &game);
         if (frame / SNAPSHOT_EVERY != (frame - (unsigned) frames) / SNAPSHOT_EVERY && mem.ewram && mem.iwram) {
             pd_snapshot_read(&snap, &game, bus_read, &mem);
             pd_ui_update(&ui, &snap);
