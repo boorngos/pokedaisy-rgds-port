@@ -81,6 +81,8 @@ struct video {
     SDL_Texture* texGame;
     SDL_Texture* texUi;
     int stacked;
+    int rgdsTouch; // Wayland on the RG DS: the glass is one half of the 1280 desktop
+    int gameBgr;   // mGBA pixels are 0xBBGGRR; the UI canvas is 0xRRGGBB
 };
 
 struct game_mem {
@@ -382,6 +384,8 @@ static SDL_Renderer* make_renderer(SDL_Window* w) {
 
 static bool video_init(struct video* v, enum layout want) {
     int displays = SDL_GetNumVideoDisplays();
+    const char* drv = getenv("SDL_VIDEODRIVER");
+    v->rgdsTouch = (drv && !strcmp(drv, "wayland")) || getenv("WAYLAND_DISPLAY") != NULL;
     v->layout = want;
     if (want == LAYOUT_AUTO) {
         v->layout = (displays >= 2) ? LAYOUT_DUAL : LAYOUT_STACKED;
@@ -442,9 +446,19 @@ static void video_quit(struct video* v) {
     memset(v, 0, sizeof(*v));
 }
 
+static uint32_t gameUpload[GBA_W * GBA_H];
+
 static void present_screens(struct video* v, int screenMode, const uint32_t* game, const uint32_t* ui, int uiDirty) {
     if (game && v->texGame) {
-        SDL_UpdateTexture(v->texGame, NULL, game, GBA_W * 4);
+        const uint32_t* src = game;
+        if (v->gameBgr) {
+            for (int i = 0; i < GBA_W * GBA_H; i++) {
+                uint32_t p = game[i];
+                gameUpload[i] = (p & 0xFF00FF00u) | ((p & 0x00FF0000u) >> 16) | ((p & 0x000000FFu) << 16);
+            }
+            src = gameUpload;
+        }
+        SDL_UpdateTexture(v->texGame, NULL, src, GBA_W * 4);
     }
     if (ui && v->texUi && uiDirty) {
         for (int i = 0; i < PD_UI_WIDTH * PD_UI_HEIGHT; i++)
@@ -537,6 +551,46 @@ static void draw_fake_game(uint32_t* dst, const char* title, const char* line) {
     pd_text(&c, 20, 60, "top 640x480  game", 0x181830, PD_NO_SHADOW);
     pd_text(&c, 20, 76, "bot 640x480  companion", 0x181830, PD_NO_SHADOW);
     pd_text(&c, 20, 100, line ? line : "", 0x403020, PD_NO_SHADOW);
+}
+
+/* Goodix on the RG DS is calibrated onto one half of the 1280-wide Weston
+   desktop. SDL still reports that half (0.5..1 or 0..0.5) for a 640 window. */
+static float rgds_touch_x(float fx) {
+    static int half;
+    if (fx < 0.f) fx = 0.f;
+    if (fx > 1.f) fx = 1.f;
+    if (half == 0) {
+        if (fx >= 0.62f) half = 1;
+        else if (fx <= 0.38f) half = -1;
+    }
+    if (half > 0) {
+        if (fx < 0.25f) return 1.f;
+        if (fx < 0.5f) return 0.f;
+        return (fx - 0.5f) * 2.f;
+    }
+    if (half < 0) {
+        if (fx > 0.75f) return 0.f;
+        if (fx > 0.5f) return 1.f;
+        return fx * 2.f;
+    }
+    if (fx < 0.5f) return fx * 2.f;
+    return (fx - 0.5f) * 2.f;
+}
+
+static void finger_to_ui(struct video* v, float fx, float fy, int* ox, int* oy, int* onUi) {
+    *onUi = 0;
+    *ox = 0;
+    *oy = 0;
+    if (v->rgdsTouch) fx = rgds_touch_x(fx);
+    if (fx < 0.f) fx = 0.f;
+    if (fx > 1.f) fx = 1.f;
+    if (fy < 0.f) fy = 0.f;
+    if (fy > 1.f) fy = 1.f;
+    *ox = (int) (fx * PD_UI_WIDTH);
+    *oy = (int) (fy * PD_UI_HEIGHT);
+    if (*ox >= PD_UI_WIDTH) *ox = PD_UI_WIDTH - 1;
+    if (*oy >= PD_UI_HEIGHT) *oy = PD_UI_HEIGHT - 1;
+    *onUi = 1;
 }
 
 static void map_touch(struct video* v, SDL_Window* win, int x, int y, int* ox, int* oy, int* onUi) {
@@ -695,6 +749,8 @@ static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui,
         SDL_SetWindowFullscreen(v->winTop, (f & SDL_WINDOW_FULLSCREEN_DESKTOP) ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
     }
     if (e->type == SDL_MOUSEBUTTONDOWN || e->type == SDL_MOUSEBUTTONUP || e->type == SDL_MOUSEMOTION) {
+        if ((e->type == SDL_MOUSEMOTION ? e->motion.which : e->button.which) == SDL_TOUCH_MOUSEID)
+            return false;
         int mx, my;
         Uint32 buttons = SDL_GetMouseState(&mx, &my);
         SDL_Window* win = SDL_GetMouseFocus();
@@ -710,14 +766,19 @@ static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui,
         }
     }
     if (e->type == SDL_FINGERDOWN || e->type == SDL_FINGERMOTION || e->type == SDL_FINGERUP) {
-        SDL_Window* win = SDL_GetWindowFromID((Uint32) e->tfinger.windowID);
-        if (!win) win = v->stacked ? v->winTop : v->winBot;
-        int ww, wh;
-        SDL_GetWindowSize(win, &ww, &wh);
-        int mx = (int) (e->tfinger.x * ww);
-        int my = (int) (e->tfinger.y * wh);
         int ox, oy, onUi;
-        map_touch(v, win, mx, my, &ox, &oy, &onUi);
+        if (v->rgdsTouch || !v->stacked) {
+            /* The glass is the bottom LCD. Its events are not tied to winBot. */
+            finger_to_ui(v, e->tfinger.x, e->tfinger.y, &ox, &oy, &onUi);
+        } else {
+            SDL_Window* win = SDL_GetWindowFromID((Uint32) e->tfinger.windowID);
+            if (!win) win = v->winTop;
+            int ww, wh;
+            SDL_GetWindowSize(win, &ww, &wh);
+            int mx = (int) (e->tfinger.x * ww);
+            int my = (int) (e->tfinger.y * wh);
+            map_touch(v, win, mx, my, &ox, &oy, &onUi);
+        }
         if (onUi) {
             bool down = e->type != SDL_FINGERUP;
             *redraw |= pd_ui_touch(ui, ox, oy, down);
@@ -863,6 +924,7 @@ static bool run_game(const char* file) {
         return true;
     }
 
+    g.video.gameBgr = 1;
     bool redraw = true, touching = false, leave = false, ffToggled = false;
     int leaveHeld = 0;
     unsigned frame = 0, fpsFrames = 0;
@@ -921,6 +983,7 @@ static bool run_game(const char* file) {
             present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 0);
         }
     }
+    g.video.gameBgr = 0;
     g.audioMuted = false;
     if (g.audio) SDL_ClearQueuedAudio(g.audio);
     core->deinit(core);
@@ -961,7 +1024,20 @@ static bool pick_rom(char* out, size_t outLen) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { g.running = false; break; }
             if (e.type == SDL_CONTROLLERDEVICEADDED) open_first_pad();
+            if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION || e.type == SDL_FINGERUP) {
+                int ox, oy, onUi;
+                finger_to_ui(&g.video, e.tfinger.x, e.tfinger.y, &ox, &oy, &onUi);
+                if (onUi) {
+                    bool down = e.type != SDL_FINGERUP;
+                    int row = pd_menu_touch(&menu, ox, oy, down);
+                    touching = down;
+                    dirty = true;
+                    if (!down && row >= 0) { picked = true; goto done; }
+                }
+            }
             if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP || e.type == SDL_MOUSEMOTION) {
+                if ((e.type == SDL_MOUSEMOTION ? e.motion.which : e.button.which) == SDL_TOUCH_MOUSEID)
+                    continue;
                 int mx, my;
                 Uint32 buttons = SDL_GetMouseState(&mx, &my);
                 SDL_Window* win = SDL_GetMouseFocus();
@@ -1079,6 +1155,8 @@ int main(int argc, char** argv) {
 
     bool needVideo = !g.shotPath[0];
     if (needVideo) {
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+        SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
             fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
             return 1;
