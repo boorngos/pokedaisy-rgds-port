@@ -36,5 +36,7 @@ bool pd_dex_sprite(const struct pd_game* g, int species, uint32_t* out);
 // "2'04\"" and "15.2 lbs." - the app's imperial conversions.
 void pd_dex_height(int dm, char* buf, int len);
 void pd_dex_weight(int hg, char* buf, int len);
+// The species' name: the bundled table, or the ROM's own once the id is past it.
+const char* pd_dex_name(const struct pd_game* g, int species, char* buf, size_t len);
 
 #endif

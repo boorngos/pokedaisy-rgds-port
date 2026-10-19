@@ -85,6 +85,18 @@ static const struct pd_config FIRERED_REV0_RAM_ONLY = {
     .monIconTable = 0x083D37A0,
     .monIconPaletteIndices = 0x083D3E80,
     .monIconPaletteTable = 0x083D4038,
+    // Same layout as rev 1, shifted to where this revision keeps the tables.
+    // Bulbasaur's entry is "Seed", 0.7 m, 6.9 kg.
+    .dexEntries = 0x0844E850,
+    .dexEntryStride = 0x24,
+    .speciesInfo = 0x08254784,
+    .speciesToNational = 0x08251FEE,
+    .abilityNames = 0x0824FC40,
+    .frontPics = 0x082350AC,
+    .palettes = 0x0823730C,
+    .regionalOrder = 0,
+    .regionalCount = 151,
+    .regionName = "KANTO",
 };
 
 static const struct pd_config LEAFGREEN_REV0_RAM_ONLY = {

@@ -91,7 +91,7 @@ static void list_view(struct pd_ui* ui, struct pd_canvas* c, const struct pd_gam
         snprintf(num, sizeof(num), "No.%03d", shown_number(g, national, nat));
         int ty = pd_text_y(ry, DEX_ROW);
         pd_text(c, ix + 22, ty, num, PD_MUTED, PD_MUTED_SHADOW);
-        const char* name = pd_species_name(pd_dex_species(g, nat), buf, sizeof(buf));
+        const char* name = pd_dex_name(g, pd_dex_species(g, nat), buf, sizeof(buf));
         pd_text(c, ix + 74, ty, name, seen ? PD_LABEL : PD_MUTED, seen ? PD_LABEL_SHADOW : PD_MUTED_SHADOW);
         int top = ry < iy ? iy : ry;
         int bottom = ry + DEX_ROW > iy + ih ? iy + ih : ry + DEX_ROW;
@@ -137,7 +137,7 @@ static void entry_view(struct pd_ui* ui, struct pd_canvas* c, const struct pd_ga
     int tx = bx + PD_SPRITE + 24, tw = ix + iw - tx;
     snprintf(buf, sizeof(buf), "No.%03d", shown_number(g, national, e.national));
     pd_text(c, tx, top, buf, PD_MUTED, PD_MUTED_SHADOW);
-    int nw = pd_text(c, tx + 50, top, pd_species_name(e.species, buf2, sizeof(buf2)), PD_LABEL, PD_LABEL_SHADOW);
+    int nw = pd_text(c, tx + 50, top, pd_dex_name(g, e.species, buf2, sizeof(buf2)), PD_LABEL, PD_LABEL_SHADOW);
     if (pd_dex_seen(s, e.national)) ui_ball(c, tx + 50 + nw + 6, top + 4, pd_dex_caught(s, e.national));
     snprintf(buf, sizeof(buf), "%s POKéMON", e.category);
     pd_text_fit(c, tx, top + 18, tw, buf, PD_MUTED, PD_MUTED_SHADOW);

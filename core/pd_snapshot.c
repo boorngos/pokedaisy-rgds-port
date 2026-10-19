@@ -129,16 +129,28 @@ bool pd_decode_party_mon(const uint8_t* raw, struct pd_mon* m) {
         block[i * 4 + 3] = (uint8_t) (w >> 24);
         sum = (uint16_t) (sum + (w & 0xFFFF) + (w >> 16));
     }
-    // Retail boxes are encrypted and checksummed; an empty slot fails here.
-    if (sum != stored || stored == 0) return false;
 
-    int off[4] = {0};
-    for (int slot = 0; slot < 4; slot++) off[SUBSTRUCT_ORDER[personality % 24][slot]] = slot * 12;
-    m->species = u16(block + off[0]);
-    if (m->species == 0) return false;
+    // Retail boxes are shuffled by personality % 24. CFRU leaves them in
+    // canonical order (Growth, Attacks, EVs, Misc) and stores checksum 0.
+    int off[4];
+    const uint8_t* data;
+    if (sum == stored && stored != 0) {
+        data = block;
+        for (int slot = 0; slot < 4; slot++) off[SUBSTRUCT_ORDER[personality % 24][slot]] = slot * 12;
+    } else if (stored == 0 && (raw[0x13] & 0x02) && raw[0x54] >= 1 && raw[0x54] <= 100) {
+        data = raw + 0x20;
+        off[0] = 0;
+        off[1] = 12;
+        off[2] = 24;
+        off[3] = 36;
+    } else {
+        return false;
+    }
+    m->species = u16(data + off[0]);
+    if (m->species == 0 || m->species > 3000) return false;
     for (int i = 0; i < PD_NUM_MOVES; i++) {
-        m->moves[i] = u16(block + off[1] + i * 2);
-        m->pp[i] = block[off[1] + 8 + i];
+        m->moves[i] = u16(data + off[1] + i * 2);
+        m->pp[i] = data[off[1] + 8 + i];
     }
     m->personality = personality;
     m->level = raw[0x54];
@@ -189,11 +201,14 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
     read_u32(read, ctx, cfg->gMain + 0x24, &s->frame);
 
     // --- party ---
+    // The count byte is 0 on some frames after a load even though the six
+    // slots are already filled, so an empty count still scans the array.
+    // Empty slots fail the checksum and are skipped.
     uint8_t count = 0;
     read(ctx, cfg->playerPartyCount, &count, 1);
-    if (count > PD_PARTY_SIZE) count = PD_PARTY_SIZE;
+    if (count == 0 || count > PD_PARTY_SIZE) count = PD_PARTY_SIZE;
     uint8_t raw[PD_PARTY_SIZE * MON_SIZE];
-    if (count && read(ctx, cfg->playerParty, raw, count * MON_SIZE)) {
+    if (read(ctx, cfg->playerParty, raw, count * MON_SIZE)) {
         for (int i = 0; i < count; i++) {
             if (pd_decode_party_mon(raw + i * MON_SIZE, &s->party[s->partyCount])) s->partyCount++;
         }
@@ -263,6 +278,19 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
     }
 
     bool saveOk = haveKey && in_ram(sb1);
+    // FireRed also keeps the party in SaveBlock1 (count at +0x34, six Pokémon
+    // at +0x38). Use it when the live array didn't decode.
+    if (s->partyCount == 0 && saveOk && cfg->playerParty == 0x02024284) {
+        uint8_t saveCount = 0;
+        read(ctx, sb1 + 0x34, &saveCount, 1);
+        if (saveCount == 0 || saveCount > PD_PARTY_SIZE) saveCount = PD_PARTY_SIZE;
+        uint8_t saveParty[PD_PARTY_SIZE * MON_SIZE];
+        if (read(ctx, sb1 + 0x38, saveParty, saveCount * MON_SIZE)) {
+            for (int i = 0; i < saveCount; i++) {
+                if (pd_decode_party_mon(saveParty + i * MON_SIZE, &s->party[s->partyCount])) s->partyCount++;
+            }
+        }
+    }
     s->gender = -1;
     if (saveOk) read_save_fields(s, cfg, read, ctx, sb1, sb2);
 
@@ -325,16 +353,40 @@ static void read_save_fields(struct pd_snapshot* s, const struct pd_config* cfg,
     if (read(ctx, sb2 + SAVEBLOCK2_GENDER_OFF, &gender, 1)) s->gender = gender <= 1 ? gender : -1;
 
     // struct Pokedex at SaveBlock2+0x18: owned at +0x10, seen at +0x44.
-    uint8_t owned[PD_DEX_BYTES], seen[PD_DEX_BYTES], copy1[PD_DEX_BYTES], copy2[PD_DEX_BYTES], magic = 0;
-    if (cfg->dexSeenCopy1 && read(ctx, sb2 + 0x28, owned, PD_DEX_BYTES) && read(ctx, sb2 + 0x5C, seen, PD_DEX_BYTES) &&
-        read(ctx, sb1 + cfg->dexSeenCopy1, copy1, PD_DEX_BYTES) &&
-        read(ctx, sb1 + cfg->dexSeenCopy2, copy2, PD_DEX_BYTES) &&
+    // Retail only. The three copies are 52 bytes; reading more would pull in
+    // the bytes that follow them.
+    uint8_t owned[PD_DEX_RETAIL], seen[PD_DEX_RETAIL], copy1[PD_DEX_RETAIL], copy2[PD_DEX_RETAIL], magic = 0;
+    if (cfg->dexSeenCopy1 && read(ctx, sb2 + 0x28, owned, PD_DEX_RETAIL) && read(ctx, sb2 + 0x5C, seen, PD_DEX_RETAIL) &&
+        read(ctx, sb1 + cfg->dexSeenCopy1, copy1, PD_DEX_RETAIL) &&
+        read(ctx, sb1 + cfg->dexSeenCopy2, copy2, PD_DEX_RETAIL) &&
         read(ctx, sb2 + 0x18 + cfg->nationalMagicOff, &magic, 1)) {
         s->dexOk = true;
         s->dexNational = magic == cfg->nationalMagic;
-        for (int i = 0; i < PD_DEX_BYTES; i++) {
+        for (int i = 0; i < PD_DEX_RETAIL; i++) {
             s->dexSeen[i] = seen[i] & copy1[i] & copy2[i];
             s->dexCaught[i] = owned[i] & s->dexSeen[i];
+        }
+    }
+    // CFRU replaced the bag arrays with one seen bitfield and one caught
+    // bitfield (SaveBlock1 +0x310 / +0x38D, 1000 bits, no second copy).
+    // Retail leaves a real checksum on every party Pokémon; CFRU leaves 0
+    // and hasSpecies set, which is how a retail save is told apart.
+    bool retailSeen = false;
+    for (int i = 0; i < PD_DEX_RETAIL; i++) {
+        if (s->dexSeen[i]) retailSeen = true;
+    }
+    uint8_t mark[0x20];
+    if (!retailSeen && read(ctx, sb1 + 0x38, mark, sizeof(mark)) && u16(mark + 28) == 0 && (mark[0x13] & 0x02)) {
+        uint8_t cfruSeen[PD_DEX_CFRU], cfruCaught[PD_DEX_CFRU];
+        if (read(ctx, sb1 + 0x310, cfruSeen, sizeof(cfruSeen)) &&
+            read(ctx, sb1 + 0x38D, cfruCaught, sizeof(cfruCaught))) {
+            s->dexOk = true;
+            memset(s->dexSeen, 0, sizeof(s->dexSeen));
+            memset(s->dexCaught, 0, sizeof(s->dexCaught));
+            for (int i = 0; i < PD_DEX_CFRU; i++) {
+                s->dexSeen[i] = cfruSeen[i];
+                s->dexCaught[i] = (uint8_t) (cfruCaught[i] & cfruSeen[i]);
+            }
         }
     }
 

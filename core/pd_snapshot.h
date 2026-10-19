@@ -47,8 +47,12 @@ struct pd_battle_mon {
 
 // A pocket's slots: every pocket of FireRed's and Emerald's bag holds at most 64.
 #define PD_POCKET_SLOTS 64
-#define PD_NATIONAL_COUNT 386
-#define PD_DEX_BYTES 52
+#define PD_NATIONAL_COUNT 1025
+// Retail FireRed/Emerald keep 52 bytes (386 species). CFRU hacks keep a
+// 1000-bit seen/caught pair instead, so the buffers cover both.
+#define PD_DEX_BYTES 129
+#define PD_DEX_RETAIL 52
+#define PD_DEX_CFRU 125
 #define PD_FLAG_BYTES 0x12C // Emerald's; FireRed's 0x120 fit
 #define PD_VAR_COUNT 0x100
 #define PD_GAME_STATS 52 // up to GAME_STAT_BERRY_CRUSH_POINTS

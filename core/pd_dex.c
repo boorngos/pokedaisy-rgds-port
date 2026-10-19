@@ -8,6 +8,7 @@
 #include "pd_tables.h"
 
 #define SPECIES_COUNT 412
+#define EXT_SPECIES 2048
 
 static uint16_t u16(const uint8_t* p) {
     return (uint16_t) (p[0] | p[1] << 8);
@@ -22,6 +23,68 @@ static unsigned tablesRom;
 static uint16_t toNational[SPECIES_COUNT];
 static uint16_t toSpecies[PD_NATIONAL_COUNT + 1];
 static bool available;
+static uint16_t extToNational[EXT_SPECIES];
+static uint16_t extToSpecies[PD_NATIONAL_COUNT + 1];
+static bool extOn;
+static uint32_t extNames;
+
+static void build_ext(const struct pd_game* g) {
+    extOn = false;
+    extNames = 0;
+    memset(extToNational, 0, sizeof(extToNational));
+    memset(extToSpecies, 0, sizeof(extToSpecies));
+    const uint8_t* hdr = pd_rom_at(g, 0x08000100, 0x48);
+    if (!hdr || !g->rom || g->romSize < 0x100000) return;
+    uint32_t ver = u32(hdr);
+    if (ver < 1 || ver > 5) return;
+    // GF header: monSpeciesNames. A retail table ends well before species 500;
+    // a CFRU hack's does not.
+    uint32_t names = u32(hdr + 0x44);
+    const uint8_t* probe = pd_rom_at(g, names + 500 * 11, 11);
+    if (!probe) return;
+    char name[16];
+    pd_gen3_text(probe, 11, name, sizeof(name));
+    if (!name[0] || !name[1]) return;
+    const uint8_t* rom = g->rom;
+    size_t size = g->romSize;
+    int bestScore = 0;
+    size_t best = 0;
+    for (size_t off = 0; off + 40 < size; off += 2) {
+        if (rom[off] != 1 || rom[off + 1] != 0) continue;
+        bool seq = true;
+        for (int i = 1; i < 20; i++) {
+            int v = rom[off + i * 2] | (rom[off + i * 2 + 1] << 8);
+            if (v != i + 1) {
+                seq = false;
+                break;
+            }
+        }
+        if (!seq) continue;
+        int score = 0, gap = 0;
+        for (int n = 0; n < EXT_SPECIES - 1 && off + (size_t) (n + 1) * 2 <= size; n++) {
+            int v = rom[off + n * 2] | (rom[off + n * 2 + 1] << 8);
+            if (v >= 1 && v <= PD_NATIONAL_COUNT) {
+                score++;
+                gap = 0;
+            } else if (++gap >= 32) {
+                break;
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = off;
+        }
+    }
+    if (bestScore < 800) return;
+    for (int n = 0; n < EXT_SPECIES - 1 && best + (size_t) (n + 1) * 2 <= size; n++) {
+        int v = rom[best + n * 2] | (rom[best + n * 2 + 1] << 8);
+        if (v < 1 || v > PD_NATIONAL_COUNT) continue;
+        extToNational[n + 1] = (uint16_t) v;
+        if (!extToSpecies[v]) extToSpecies[v] = (uint16_t) (n + 1);
+    }
+    extNames = names;
+    extOn = extToSpecies[1] != 0;
+}
 
 static void build(const struct pd_game* g) {
     if (tablesRom == pd_rom_id(g)) return;
@@ -29,6 +92,7 @@ static void build(const struct pd_game* g) {
     available = false;
     memset(toNational, 0, sizeof(toNational));
     memset(toSpecies, 0, sizeof(toSpecies));
+    build_ext(g);
     const struct pd_config* cfg = g->cfg;
     if (!cfg || !cfg->dexEntries || !g->rom) return;
     const uint8_t* nat = pd_rom_at(g, cfg->speciesToNational, (SPECIES_COUNT - 1) * 2);
@@ -36,7 +100,11 @@ static void build(const struct pd_game* g) {
     if (!nat || !e1) return;
     char category[24];
     pd_gen3_text(e1, 12, category, sizeof(category));
-    if (strcmp(category, "SEED") || u16(e1 + 0x0C) != 7 || u16(e1 + 0x0E) != 69 || u16(nat) != 1) return;
+    // Retail entries say "SEED"; this FireRed says "Seed".
+    if ((strcmp(category, "SEED") && strcmp(category, "Seed")) || u16(e1 + 0x0C) != 7 || u16(e1 + 0x0E) != 69 ||
+        u16(nat) != 1) {
+        return;
+    }
     for (int s = 1; s < SPECIES_COUNT; s++) {
         int n = u16(nat + (s - 1) * 2);
         toNational[s] = (uint16_t) n;
@@ -48,16 +116,20 @@ static void build(const struct pd_game* g) {
 
 bool pd_dex_available(const struct pd_game* g) {
     build(g);
-    return available;
+    return available || extOn;
 }
 
 int pd_dex_species(const struct pd_game* g, int national) {
     build(g);
+    if (extOn && national >= 1 && national <= PD_NATIONAL_COUNT && extToSpecies[national]) {
+        return extToSpecies[national];
+    }
     return available && national >= 1 && national <= PD_NATIONAL_COUNT ? toSpecies[national] : 0;
 }
 
 int pd_dex_national(const struct pd_game* g, int species) {
     build(g);
+    if (extOn && species >= 1 && species < EXT_SPECIES && extToNational[species]) return extToNational[species];
     return available && species >= 1 && species < SPECIES_COUNT ? toNational[species] : 0;
 }
 
@@ -72,11 +144,13 @@ int pd_dex_regional(const struct pd_game* g, int i) {
 bool pd_dex_entry(const struct pd_game* g, int national, struct pd_dex_entry* out) {
     memset(out, 0, sizeof(*out));
     const struct pd_config* cfg = g->cfg;
-    if (!pd_dex_available(g)) return false;
-    const uint8_t* e = pd_rom_at(g, cfg->dexEntries + (uint32_t) national * cfg->dexEntryStride, cfg->dexEntryStride);
-    if (!e) return false;
+    if (!pd_dex_available(g) || !cfg) return false;
     out->national = national;
     out->species = pd_dex_species(g, national);
+    // Past the retail tables the entry bytes belong to something else.
+    if (out->species > SPECIES_COUNT - 1) return out->species != 0;
+    const uint8_t* e = pd_rom_at(g, cfg->dexEntries + (uint32_t) national * cfg->dexEntryStride, cfg->dexEntryStride);
+    if (!e) return out->species != 0;
     pd_gen3_text(e, 12, out->category, sizeof(out->category));
     out->heightDm = u16(e + 0x0C);
     out->weightHg = u16(e + 0x0E);
@@ -146,4 +220,16 @@ void pd_dex_weight(int hg, char* buf, int len) {
     long lbs = 100000L * hg / 4536;
     if (lbs % 10 >= 5) lbs += 10;
     snprintf(buf, (size_t) len, "%ld.%ld lbs.", lbs / 100, (lbs % 100) / 10);
+}
+
+const char* pd_dex_name(const struct pd_game* g, int species, char* buf, size_t len) {
+    build(g);
+    if (species > SPECIES_COUNT - 1 && extNames) {
+        const uint8_t* n = pd_rom_at(g, extNames + (uint32_t) species * 11, 11);
+        if (n) {
+            pd_gen3_text(n, 11, buf, len);
+            if (buf[0]) return buf;
+        }
+    }
+    return pd_species_name(species, buf, len);
 }

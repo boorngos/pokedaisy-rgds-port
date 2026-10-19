@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "pd_dex.h"
 #include "pd_icon.h"
 #include "pd_tables.h"
 #include "pd_ui_internal.h"
@@ -94,7 +95,7 @@ static void summary(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game*
         char lv[12];
         snprintf(lv, sizeof(lv), "Lv%d", m->level);
         pd_text_right(c, ix + iw, ty, lv, PD_VALUE, PD_VALUE_SHADOW);
-        const char* species = pd_species_name(m->species, buf2, sizeof(buf2));
+        const char* species = pd_dex_name(g, m->species, buf2, sizeof(buf2));
         if (strcmp(species, name)) pd_text(c, ix + nameW + 14, ty, species, PD_MUTED, PD_MUTED_SHADOW);
     }
     ty += 20;
