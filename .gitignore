@@ -1,0 +1,12 @@
+build/
+build-*/
+.cache/
+*.o
+*.gba
+*.sav
+*.srm
+*.ss1
+.DS_Store
+third_party/SDL2/
+third_party/mgba/
+CMakeUserPresets.json

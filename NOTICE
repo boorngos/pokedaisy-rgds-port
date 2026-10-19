@@ -1,0 +1,45 @@
+PokeDaisy Linux (Anbernic RG DS)
+Copyright (C) 2026
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 (see LICENSE), with the additional term below.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+ADDITIONAL TERM (GNU GPL version 3, section 7(b))
+
+Anyone who conveys this program, or any work based on it, in source or
+compiled form, must preserve the following attribution:
+
+    Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy
+
+It must appear (1) in this NOTICE file, kept with the source; (2) in the
+work's README or equivalent documentation; and (3) where the work shows
+credits, an "About" screen or other Appropriate Legal Notices, there too.
+
+This Linux port reuses PokeDaisy's portable C companion core (the 3DS rewrite
+of the Android app's readers and drawing) and embeds mGBA to run GBA games
+on the Anbernic RG DS dual 640x480 screens under Linux.
+
+THIRD-PARTY COMPONENTS
+
+- PokeDaisy companion core (`core/`), Copyright (C) 2026 Lidor Itzhari,
+  GNU GPL v3 with the additional attribution term above.
+  https://github.com/lidor30/pokedaisy
+- mGBA, Copyright (c) 2013-2022 Jeffrey Pfau and contributors,
+  Mozilla Public License 2.0 - https://github.com/mgba-emu/mgba
+  (pinned to 0.10.5). Built with its bundled blip_buf (GNU LGPL 2.1) and
+  inih (BSD).
+- SDL2, Copyright (C) 1997-2024 Sam Lantinga, zlib License.
+- Pixel Operator font tables in the companion core, by Jayvee Enaguas, CC0 1.0.
+
+GAMES AND TRADEMARKS
+
+Pokemon and all related names are trademarks of Nintendo, Game Freak,
+Creatures and The Pokemon Company. Game Boy, Game Boy Color and Game Boy
+Advance are trademarks of Nintendo. Anbernic and RG DS belong to their maker.
+This is a fan project, not affiliated with or endorsed by any of them.
+No games, BIOS or official art are included: use your own legally dumped ROMs.

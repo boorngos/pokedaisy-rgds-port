@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PokeDaisy Linux — Anbernic RG DS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <p class="kicker">Linux · Anbernic RG DS · 640×480 × 2</p>
+    <h1>PokeDaisy sul clamshell</h1>
+    <p class="lede">
+      Port Linux del companion dual-screen di PokeDaisy: il gioco GBA sul pannello
+      superiore, party / borsa / mappa / lotta / guida su quello inferiore.
+      Nessuna ROM inclusa; la demo qui sotto usa RAM di test.
+    </p>
+  </header>
+
+  <section class="device" aria-label="Anteprima dual-screen">
+    <div class="hinge-label">schermo superiore · gioco 640×480</div>
+    <figure class="panel">
+      <img id="shot" src="shots/firered.png" alt="PokeDaisy: gioco sopra, companion sotto" />
+    </figure>
+    <div class="hinge-label">schermo inferiore · companion 640×480</div>
+    <nav class="shots" aria-label="Scene della demo">
+      <button type="button" data-src="shots/firered.png" class="on">Party FireRed</button>
+      <button type="button" data-src="shots/firered-bag.png">Borsa</button>
+      <button type="button" data-src="shots/firered-settings.png">Impostazioni</button>
+      <button type="button" data-src="shots/emerald.png">Party Emerald</button>
+      <button type="button" data-src="shots/emerald-battle-battle.png">Lotta</button>
+    </nav>
+  </section>
+
+  <section class="grid">
+    <article>
+      <h2>Sul dispositivo</h2>
+      <ol>
+        <li>Compila per aarch64 (o copia il binario <code>pokedaisy</code>).</li>
+        <li>Metti lo script in <code>ports/PokeDaisy.sh</code> e i file nella stessa cartella.</li>
+        <li>Copia i tuoi dump <code>.gba</code> in <code>roms/</code> (FireRed rev 1 o Emerald).</li>
+        <li>Avvia da Linux Anbernic / Rocknix. Due pannelli: layout <code>dual</code>.</li>
+      </ol>
+    </article>
+    <article>
+      <h2>Comandi RG DS</h2>
+      <ul>
+        <li>D-pad / stick sinistro, A/B, Start, Select, L/R: i tasti GBA.</li>
+        <li>X: scheda successiva del companion. Y: indietro.</li>
+        <li>R2 (o Space sul PC): avanzamento rapido.</li>
+        <li>Tieni X+Y: salva e torna alla lista. Touch sullo schermo basso.</li>
+      </ul>
+    </article>
+  </section>
+
+  <footer>
+    Based on PokeDaisy by Lidor Itzhari —
+    <a href="https://github.com/lidor30/pokedaisy">github.com/lidor30/pokedaisy</a>.
+    Fan project, GPL-3. Nessun gioco incluso.
+  </footer>
+  <script>
+    const img = document.getElementById("shot");
+    document.querySelectorAll(".shots button").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll(".shots button").forEach((x) => x.classList.remove("on"));
+        b.classList.add("on");
+        img.src = b.dataset.src;
+      });
+    });
+  </script>
+</body>
+</html>
