@@ -77,6 +77,7 @@ enum pd_action {
     PD_ACTION_BATTLE_RUN,
     PD_ACTION_BATTLE_MOVE,   // actionArg = move slot 0..3
     PD_ACTION_BATTLE_SWITCH, // actionArg = party slot
+    PD_ACTION_BATTLE_BACK,   // one B, out of the menu the game has open
     // actionArg = the game's bag pocket, actionArg2 = item index in it,
     // actionArg3 = berry index after the BERRY POUCH (-1 = the item itself),
     // actionArg4 = party slot to use it on (-1 = no target).
@@ -126,6 +127,10 @@ struct pd_ui {
     // On the controls (battleButtons, pane 0): 0 the buttons, 1 moves,
     // 2 who to send in, 3 the bag, 4 who an item is used on.
     int battlePick;
+    // What the game's own battle menu is waiting for (pd_battle.h). The
+    // controls follow it: moves only while it is choosing a move.
+    int battleMenu;
+    int battleChosen; // party slot highlighted on the battle party pane, -1 = none
     unsigned foeSeen;
     int foeSelected, foeShown;
     int lastFoeActive, lastFoeNext;
@@ -184,6 +189,8 @@ bool pd_ui_back(struct pd_ui* ui);
 void pd_ui_search_type(struct pd_ui* ui, int ch);
 // The last thing the player asked the host for (once), or PD_ACTION_NONE.
 enum pd_action pd_ui_take_action(struct pd_ui* ui);
+// The game's battle menu changed. Closes a local pane the game has left.
+bool pd_ui_set_battle_menu(struct pd_ui* ui, int menu);
 // Time passing (milliseconds since the last call): true when something on
 // screen animates and needs a redraw (the MAP cursor's blink, the TRAINER
 // CARD's colon and flip).

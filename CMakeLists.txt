@@ -89,6 +89,7 @@ file(GLOB CORE_SOURCES "${CMAKE_SOURCE_DIR}/core/*.c")
 
 add_executable(pokedaisy
     linux/host.c
+    linux/pd_pc.c
     linux/pd_png.c
     linux/pd_zip.c
     linux/pd_sha1.c

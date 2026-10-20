@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "pd_battle.h"
 #include "pd_icon.h"
 #include "pd_tables.h"
 #include "pd_ui_internal.h"
@@ -442,8 +443,9 @@ static bool can_send(const struct pd_mon* m, const struct pd_snapshot* s) {
     return m->species && m->species != PD_SPECIES_EGG && m->hp > 0 && !is_out(m, s);
 }
 
+// choose: tap highlights, then SUMMARY or SHIFT. Otherwise a tap sends that Pokémon.
 static void party_pick(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g, const struct pd_snapshot* s,
-                       const struct mon_view* foe, const char* prompt) {
+                       const struct mon_view* foe, const char* prompt, bool choose) {
     int best = -1;
     if (foe) {
         struct pick picks[PD_PARTY_SIZE];
@@ -459,6 +461,8 @@ static void party_pick(struct pd_ui* ui, struct pd_canvas* c, const struct pd_ga
     int promptH = 32;
     int top = CONTENT_Y;
     int gridH = c->h - MARGIN - promptH - 4 - top;
+    const struct pd_mon* chosen = NULL;
+    if (choose && ui->battleChosen >= 0 && ui->battleChosen < s->partyCount) chosen = &s->party[ui->battleChosen];
     int gap = 4;
     int cw = (w - gap) / 2, ch = (gridH - 2 * gap) / 3;
     for (int i = 0; i < PD_PARTY_SIZE; i++) {
@@ -466,9 +470,11 @@ static void party_pick(struct pd_ui* ui, struct pd_canvas* c, const struct pd_ga
         int sy = top + (i / 2) * (ch + gap);
         const struct pd_mon* m = i < s->partyCount && s->party[i].species ? &s->party[i] : NULL;
         bool send = m && can_send(m, s);
-        uint32_t fill = !m ? 0x3A6A78 : m->hp == 0 ? 0xC66B10 : 0x3994DE;
-        uint32_t dark = !m ? 0x244854 : m->hp == 0 ? 0xA54A00 : 0x297BB5;
-        plat(ui, c, sx, sy, cw, ch, fill, dark, send ? HIT_SWITCH + i : -1);
+        bool on = choose && i == ui->battleChosen;
+        uint32_t fill = !m ? 0x3A6A78 : on ? 0xF0C040 : m->hp == 0 ? 0xC66B10 : 0x3994DE;
+        uint32_t dark = !m ? 0x244854 : on ? 0xA07810 : m->hp == 0 ? 0xA54A00 : 0x297BB5;
+        int hit = !m ? -1 : choose ? HIT_SWITCH + i : send ? HIT_SWITCH + i : -1;
+        plat(ui, c, sx, sy, cw, ch, fill, dark, hit);
         if (!m) continue;
         if (pd_draw_mon_icon(c, g, m->species, sx + 4, sy + (ch - PD_ICON) / 2, m->hp == 0)) {
         }
@@ -488,12 +494,26 @@ static void party_pick(struct pd_ui* ui, struct pd_canvas* c, const struct pd_ga
         else if (m->hp == 0) pill(c, sx + cw - pd_text_width("FNT") - 10, sy + 3, "FNT", VERDICT_GREY);
     }
     int py = c->h - MARGIN - promptH;
-    pd_title_box(c, x, py, w, promptH, 0xFFFFFF);
-    pd_text_fit(c, x + 8, pd_text_y(py, promptH), w - 90, prompt, PD_LABEL, PD_LABEL_SHADOW);
-    int bw = 72;
-    plat(ui, c, x + w - bw - 4, py + 3, bw, promptH - 6, 0xF8F8F8, 0xA0A0A8, HIT_CMD_CANCEL);
-    pd_text(c, x + w - bw - 4 + (bw - pd_text_width("CANCEL")) / 2, pd_text_y(py + 3, promptH - 6), "CANCEL", PD_LABEL,
-            PD_LABEL_SHADOW);
+    if (!choose) {
+        pd_title_box(c, x, py, w, promptH, 0xFFFFFF);
+        pd_text_fit(c, x + 8, pd_text_y(py, promptH), w - 90, prompt, PD_LABEL, PD_LABEL_SHADOW);
+        int bw = 72;
+        plat(ui, c, x + w - bw - 4, py + 3, bw, promptH - 6, 0xF8F8F8, 0xA0A0A8, HIT_CMD_CANCEL);
+        pd_text(c, x + w - bw - 4 + (bw - pd_text_width("CANCEL")) / 2, pd_text_y(py + 3, promptH - 6), "CANCEL",
+                PD_LABEL, PD_LABEL_SHADOW);
+        return;
+    }
+    int bgap = 4;
+    int bw = (w - 2 * bgap) / 3;
+    bool canShift = chosen && can_send(chosen, s);
+    plat(ui, c, x, py, bw, promptH, chosen ? 0x6878C8 : 0x686868, chosen ? 0x384888 : 0x404040,
+         chosen ? HIT_CMD_SUMMARY : -1);
+    plat_label(c, x, py, bw, promptH, "SUMMARY");
+    plat(ui, c, x + bw + bgap, py, bw, promptH, canShift ? 0x58A840 : 0x686868, canShift ? 0x307020 : 0x404040,
+         canShift ? HIT_CMD_SHIFT : -1);
+    plat_label(c, x + bw + bgap, py, bw, promptH, "SHIFT");
+    plat(ui, c, x + 2 * (bw + bgap), py, bw, promptH, 0xF8F8F8, 0xA0A0A8, HIT_CMD_CANCEL);
+    plat_label(c, x + 2 * (bw + bgap), py, bw, promptH, "CANCEL");
 }
 
 #define ITEM_BERRY_POUCH 365
@@ -606,6 +626,19 @@ static void controls(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game
     plat_label(c, x + 2 * (bw + gap3), botY, bw, botH - drop, "POKéMON");
 }
 
+static void header_buttons(struct pd_ui* ui, struct pd_canvas* c, int x, int y, int w);
+
+static void standby(struct pd_ui* ui, struct pd_canvas* c, const struct pd_snapshot* s, const char* msg) {
+    int x = MARGIN, w = c->w - 2 * MARGIN;
+    int y = CONTENT_Y;
+    ball_row(c, s, x, y + 2, x + w);
+    header_buttons(ui, c, x, y + 18, w);
+    int boxY = y + 52;
+    int boxH = c->h - MARGIN - boxY;
+    int f = pd_title_box(c, x, boxY, w, boxH, 0xFFFFFF);
+    pd_text_fit(c, x + f + 8, pd_text_y(boxY, boxH), w - 2 * (f + 8), msg, PD_MUTED, PD_MUTED_SHADOW);
+}
+
 static void header_buttons(struct pd_ui* ui, struct pd_canvas* c, int x, int y, int w) {
     int infoW = 70, sugW = 120, bh = 22, gap = 6;
     int rowW = infoW + gap + sugW;
@@ -636,28 +669,43 @@ void ui_battle_tab(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* 
     }
 
     bool buttons = buttons_on(ui);
-    if (buttons && ui->battlePane == 0) {
-        if (ui->battlePick == 1) {
-            int x = MARGIN, w = c->w - 2 * MARGIN, y = CONTENT_Y;
+    int menu = ui->battleMenu;
+    if (buttons && ui->summarySlot >= 0 && ui->summarySlot < s->partyCount) {
+        ui_party_summary(ui, c, g, &s->party[ui->summarySlot]);
+        return;
+    }
+    if (buttons && (ui->battlePane == 0 || menu == PD_BMENU_MOVE || menu == PD_BMENU_PARTY || menu == PD_BMENU_BAG)) {
+        int x = MARGIN, w = c->w - 2 * MARGIN, y = CONTENT_Y;
+        if (menu == PD_BMENU_MOVE) {
             ball_row(c, s, x, y + 2, x + w);
             header_buttons(ui, c, x, y + 18, w);
             move_grid(ui, c, &you, foe, x, y + 46, w, c->h - MARGIN - (y + 46));
             return;
         }
-        if (ui->battlePick == 2) {
-            party_pick(ui, c, g, s, foe, "Choose a POKéMON.");
+        if (menu == PD_BMENU_PARTY || (menu == PD_BMENU_ACTION && ui->battlePick == 2)) {
+            party_pick(ui, c, g, s, foe, "Choose a POKéMON.", true);
             return;
         }
-        if (ui->battlePick == 4) {
-            party_pick(ui, c, g, s, foe, "Use on which POKéMON?");
+        if (ui->battlePick == 4 && (menu == PD_BMENU_ACTION || menu == PD_BMENU_BAG || menu == PD_BMENU_PARTY)) {
+            party_pick(ui, c, g, s, foe, "Use on which POKéMON?", false);
             return;
         }
-        if (ui->battlePick == 3) {
+        if (menu == PD_BMENU_BAG || (menu == PD_BMENU_ACTION && ui->battlePick == 3)) {
             bag_pick(ui, c, g, s);
             return;
         }
-        controls(ui, c, g, s, &you);
-        return;
+        if (menu == PD_BMENU_ACTION && ui->battlePane == 0) {
+            controls(ui, c, g, s, &you);
+            return;
+        }
+        if (ui->battlePane == 0 && menu == PD_BMENU_TARGET) {
+            standby(ui, c, s, "Confirming target…");
+            return;
+        }
+        if (ui->battlePane == 0 && menu != PD_BMENU_ACTION) {
+            standby(ui, c, s, "Waiting for your turn…");
+            return;
+        }
     }
 
     int infoPane = buttons ? 1 : 0;
@@ -697,19 +745,24 @@ static int pouch_index(const struct pd_snapshot* s) {
 
 bool ui_battle_act(struct pd_ui* ui, int id) {
     bool buttons = buttons_on(ui);
+    int menu = ui->battleMenu;
     if (id == HIT_BATTLE_SUGGEST || id == HIT_BATTLE_INFO || id == HIT_BATTLE_MENU) {
         if (!buttons && id == HIT_BATTLE_MENU) return false;
         ui->battlePick = 0;
+        ui->summarySlot = -1;
         if (buttons) ui->battlePane = id == HIT_BATTLE_SUGGEST ? 2 : id == HIT_BATTLE_INFO ? 1 : 0;
         else ui->battlePane = id == HIT_BATTLE_SUGGEST;
         return true;
     }
-    if (buttons && ui->battlePane == 0) {
+    if (buttons && ui->summarySlot >= 0) return false;
+    if (buttons && (ui->battlePane == 0 || menu == PD_BMENU_MOVE || menu == PD_BMENU_PARTY || menu == PD_BMENU_BAG)) {
         if (id == HIT_CMD_FIGHT) {
-            ui->battlePick = 1;
+            if (menu != PD_BMENU_ACTION) return true;
+            ui->action = PD_ACTION_BATTLE_FIGHT;
             return true;
         }
         if (id == HIT_CMD_BAG) {
+            if (menu != PD_BMENU_ACTION) return true;
             ui->battlePick = 3;
             ui->bagPocket = PD_POCKET_ITEMS;
             ui->bagScroll = 0;
@@ -717,21 +770,39 @@ bool ui_battle_act(struct pd_ui* ui, int id) {
             return true;
         }
         if (id == HIT_CMD_PKMN) {
+            if (menu != PD_BMENU_ACTION) return true;
             ui->battlePick = 2;
+            ui->battleChosen = -1;
             return true;
         }
         if (id == HIT_CMD_RUN) {
+            if (menu != PD_BMENU_ACTION) return true;
             ui->action = PD_ACTION_BATTLE_RUN;
             return true;
         }
+        if (id == HIT_CMD_SUMMARY) {
+            if (ui->battleChosen >= 0) ui->summarySlot = ui->battleChosen;
+            return true;
+        }
+        if (id == HIT_CMD_SHIFT) {
+            if (ui->battleChosen < 0) return true;
+            ui->actionArg = ui->battleChosen;
+            ui->action = PD_ACTION_BATTLE_SWITCH;
+            return true;
+        }
         if (id == HIT_CMD_CANCEL) {
-            ui->battlePick = 0;
+            if (menu == PD_BMENU_ACTION && ui->battlePick) {
+                ui->battlePick = 0;
+                ui->battleChosen = -1;
+                return true;
+            }
+            ui->action = PD_ACTION_BATTLE_BACK;
             return true;
         }
         if (id >= HIT_MOVE && id < HIT_MOVE + PD_NUM_MOVES) {
+            if (menu != PD_BMENU_MOVE) return true;
             ui->actionArg = id - HIT_MOVE;
             ui->action = PD_ACTION_BATTLE_MOVE;
-            ui->battlePick = 0;
             return true;
         }
         if (id >= HIT_SWITCH && id < HIT_SWITCH + PD_PARTY_SIZE) {
@@ -739,14 +810,13 @@ bool ui_battle_act(struct pd_ui* ui, int id) {
             if (ui->battlePick == 4) {
                 ui->actionArg4 = slot;
                 ui->action = PD_ACTION_BATTLE_ITEM;
+                ui->battlePick = 0;
             } else {
-                ui->actionArg = slot;
-                ui->action = PD_ACTION_BATTLE_SWITCH;
+                ui->battleChosen = slot;
             }
-            ui->battlePick = 0;
             return true;
         }
-        if (ui->battlePick == 3 && (id == HIT_POCKET_PREV || id == HIT_POCKET_NEXT)) {
+        if ((ui->battlePick == 3 || menu == PD_BMENU_BAG) && (id == HIT_POCKET_PREV || id == HIT_POCKET_NEXT)) {
             static const int POCKETS[] = { PD_POCKET_ITEMS, PD_POCKET_BALLS, PD_POCKET_BERRIES, PD_POCKET_KEY };
             int at = 0;
             for (int i = 0; i < 4; i++)
@@ -756,7 +826,8 @@ bool ui_battle_act(struct pd_ui* ui, int id) {
             ui->bagScroll = 0;
             return true;
         }
-        if (ui->battlePick == 3 && ui->snap && ui->game && id >= HIT_BAG_ROW && id < HIT_BAG_ROW + PD_POCKET_SLOTS) {
+        if ((ui->battlePick == 3 || menu == PD_BMENU_BAG) && ui->snap && ui->game && id >= HIT_BAG_ROW &&
+            id < HIT_BAG_ROW + PD_POCKET_SLOTS) {
             int index = id - HIT_BAG_ROW;
             int pocket = ui->bagPocket;
             const struct pd_snapshot* s = ui->snap;

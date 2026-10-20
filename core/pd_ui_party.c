@@ -74,7 +74,7 @@ static void party_slot(struct pd_ui* ui, struct pd_canvas* c, const struct pd_ga
     ui_add_hit(ui, x, y, w, h, HIT_SLOT + slot);
 }
 
-static void summary(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g, const struct pd_mon* m) {
+void ui_party_summary(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g, const struct pd_mon* m) {
     char buf[40], buf2[40];
     int x = MARGIN, y = CONTENT_Y, w = c->w - 2 * MARGIN, h = c->h - CONTENT_Y - MARGIN;
     int f = pd_title_box(c, x, y, w, h, PD_TITLE_FILL);
@@ -127,7 +127,7 @@ static void summary(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game*
 
 void ui_party_tab(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g, const struct pd_snapshot* s) {
     if (ui->summarySlot >= 0) {
-        summary(ui, c, g, &s->party[ui->summarySlot]);
+        ui_party_summary(ui, c, g, &s->party[ui->summarySlot]);
         return;
     }
     int gap = 4;

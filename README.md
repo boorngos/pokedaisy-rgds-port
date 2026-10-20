@@ -82,7 +82,7 @@ Saves: `~/.local/share/pokedaisy/saves/` (o `$POKEDAISY_HOME/saves`), formato `.
 | L / R | Q / E | Spalle GBA |
 | X | Tab | Scheda successiva del companion |
 | Y | Esc | Indietro nel companion. Nell'elenco apre SETTINGS |
-| L3 | F1 | Menu rapido (avanti veloce, salva, zoom, schede) |
+| L3 | F1 | Menu rapido (PC, avanti veloce, salva, zoom, schede) |
 | R3 | F2 | Cicla ORIGINAL / FIT / STRETCH |
 | R2 | Space | Fast-forward tenuto |
 | Touch schermo basso | Mouse | Tocchi del companion |

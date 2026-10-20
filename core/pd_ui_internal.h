@@ -52,6 +52,8 @@ enum {
     HIT_CMD_RUN = 3202,
     HIT_CMD_BAG = 3203,
     HIT_CMD_CANCEL = 3204,
+    HIT_CMD_SHIFT = 3205,
+    HIT_CMD_SUMMARY = 3206,
     HIT_MOVE = 3300,    // + move slot
     HIT_SWITCH = 3400,  // + party slot
     HIT_OPEN_CARD = 3100,
@@ -82,6 +84,7 @@ void ui_hp_bar(struct pd_canvas* c, int x, int y, int barW, int hp, int maxHp);
 void ui_status_badge(struct pd_canvas* c, int x, int y, uint32_t status);
 // A message in a list window across the content area.
 void ui_notice(struct pd_canvas* c, const char* title, const char* line1, const char* line2);
+void ui_party_summary(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g, const struct pd_mon* m);
 // A LABEL  VALUE row, the value from ~42% across (OptionLine).
 void ui_row(struct pd_canvas* c, int x, int y, int w, const char* label, const char* value, bool selected);
 void ui_format_money(long v, char* buf, size_t len);

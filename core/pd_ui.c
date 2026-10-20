@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pd_battle.h"
 #include "pd_style.h"
 #include "pd_ui_internal.h"
 
@@ -41,6 +42,8 @@ void pd_ui_init(struct pd_ui* ui, struct pd_settings* settings) {
     ui->bagSelected = -1;
     ui->pressedId = -1;
     ui->battleSlot = -1;
+    ui->battleMenu = PD_BMENU_NONE;
+    ui->battleChosen = -1;
     ui->dexNational = -1;
     ui->mapPage = -1;
     ui->mapSel = -1;
@@ -378,6 +381,20 @@ bool pd_ui_back(struct pd_ui* ui) {
         return true;
     }
     return false;
+}
+
+bool pd_ui_set_battle_menu(struct pd_ui* ui, int menu) {
+    if (menu == ui->battleMenu) return false;
+    ui->battleMenu = menu;
+    if (menu != PD_BMENU_ACTION && ui->battlePick == 1) ui->battlePick = 0;
+    if (menu != PD_BMENU_ACTION && menu != PD_BMENU_PARTY && ui->battlePick == 2) {
+        ui->battlePick = 0;
+        ui->battleChosen = -1;
+    }
+    if (menu != PD_BMENU_ACTION && menu != PD_BMENU_BAG && ui->battlePick == 3) ui->battlePick = 0;
+    if (menu != PD_BMENU_ACTION && menu != PD_BMENU_PARTY && menu != PD_BMENU_BAG && ui->battlePick == 4)
+        ui->battlePick = 0;
+    return true;
 }
 
 enum pd_action pd_ui_take_action(struct pd_ui* ui) {

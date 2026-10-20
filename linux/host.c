@@ -27,10 +27,12 @@
 #include <mgba/core/serialize.h>
 #include <mgba/gba/interface.h>
 
+#include "pd_battle.h"
 #include "pd_canvas.h"
 #include "pd_game.h"
 #include "pd_map.h"
 #include "pd_menu.h"
+#include "pd_pc.h"
 #include "pd_png.h"
 #include "pd_romart.h"
 #include "pd_settings.h"
@@ -40,6 +42,8 @@
 #include "pd_style.h"
 #include "pd_ui.h"
 #include "pd_zip.h"
+
+#define QUICK_N 9
 
 #define RG_W 640
 #define RG_H 480
@@ -906,6 +910,7 @@ static int drv_u16(uint32_t addr) {
 
 static uint32_t party_menu_addr(const struct pd_game* g) {
     if (!g) return 0;
+    if (g->title && strstr(g->title, "Lazarus")) return 0x0201B67C;
     if (!strcmp(g->code, "BPEJ")) return 0x0203CB94;
     if (g->kind == PD_GAME_EMERALD) return 0x0203CEC8;
     if (g->kind == PD_GAME_FIRERED) return 0x0203B0A0;
@@ -1185,16 +1190,21 @@ static void apply_actions(struct pd_ui* ui, struct pd_host_info* host, bool* ffT
         pd_settings_save(&g.settings, g.paths.settings);
         break;
     case PD_ACTION_BATTLE_FIGHT:
-    case PD_ACTION_BATTLE_MOVE:
         drv_stop();
         drv_cell(0);
-        drv_wait(28);
+        break;
+    case PD_ACTION_BATTLE_MOVE:
+        drv_stop();
         drv_cell(ui->actionArg);
+        break;
+    case PD_ACTION_BATTLE_BACK:
+        drv_stop();
+        drv_press(GBA_B);
         break;
     case PD_ACTION_BATTLE_PKMN:
     case PD_ACTION_BATTLE_SWITCH:
         drv_stop();
-        drv_cell(2);
+        if (ui->battleMenu != PD_BMENU_PARTY) drv_cell(2);
         drv.slot = ui->actionArg;
         drv.confirms = 2;
         drv_arm(PH_WAIT_PARTY);
@@ -1207,7 +1217,7 @@ static void apply_actions(struct pd_ui* ui, struct pd_host_info* host, bool* ffT
         break;
     case PD_ACTION_BATTLE_ITEM:
         drv_stop();
-        drv_cell(1);
+        if (ui->battleMenu != PD_BMENU_BAG) drv_cell(1);
         drv.pocket = ui->actionArg;
         drv.index = ui->actionArg2;
         drv.berry = ui->actionArg3;
@@ -1248,7 +1258,7 @@ static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui,
             if (e->type == SDL_MOUSEBUTTONUP) down = false;
             if (e->type == SDL_MOUSEBUTTONDOWN) down = true;
             if (!down) {
-                int row = pd_quick_row_at(ox, oy, 8);
+                int row = pd_quick_row_at(ox, oy, QUICK_N);
                 if (row >= 0) { g.quickSel = row; g.quickFire = row; }
             }
             *redraw = true;
@@ -1269,7 +1279,7 @@ static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui,
             /* The glass is the bottom LCD. Its events are not tied to winBot. */
             finger_to_ui(v, e->tfinger.x, e->tfinger.y, &ox, &oy, &onUi);
             if (g.quick && onUi && e->type == SDL_FINGERUP) {
-                int row = pd_quick_row_at(ox, oy, 8);
+                int row = pd_quick_row_at(ox, oy, QUICK_N);
                 if (row >= 0) { g.quickSel = row; g.quickFire = row; }
                 *redraw = true;
                 return false;
@@ -1396,25 +1406,34 @@ static void fill_hud(struct hud_view* hud, const struct pd_snapshot* s) {
 }
 
 static const char* const QUICK_ITEMS[] = {
-    "FAST-FORWARD", "SAVE STATE", "LOAD STATE", "ZOOM", "PARTY", "BAG", "MAP", "SETTINGS",
+    "PC", "FAST-FORWARD", "SAVE STATE", "LOAD STATE", "ZOOM", "PARTY", "BAG", "MAP", "SETTINGS",
 };
-#define QUICK_N 8
+_Static_assert(sizeof(QUICK_ITEMS) / sizeof(QUICK_ITEMS[0]) == QUICK_N, "quick menu size");
 
-static void quick_do(struct pd_ui* ui, int row, bool* ffToggled) {
+// False only when PC could not open, so the menu stays up.
+static bool quick_do(struct pd_ui* ui, int row, bool* ffToggled, struct mCore* core, struct game_mem* mem,
+                     const struct pd_game* game, const struct pd_snapshot* snap) {
     switch (row) {
-    case 0: *ffToggled = !*ffToggled; break;
-    case 1: ui->action = PD_ACTION_SAVE_STATE; break;
-    case 2: ui->action = PD_ACTION_LOAD_STATE; break;
-    case 3:
+    case 0:
+        if (!pd_pc_open(core, game, mem->ewram, mem->ewramSize, snap && snap->inBattle)) {
+            fprintf(stderr, "pokedaisy: the PC isn't available right now\n");
+            return false;
+        }
+        break;
+    case 1: *ffToggled = !*ffToggled; break;
+    case 2: ui->action = PD_ACTION_SAVE_STATE; break;
+    case 3: ui->action = PD_ACTION_LOAD_STATE; break;
+    case 4:
         g.settings.screenMode = (g.settings.screenMode + 1) % PD_SCREEN_MODES;
         pd_settings_save(&g.settings, g.paths.settings);
         break;
-    case 4: pd_ui_open_tab(ui, PD_TAB_PARTY); break;
-    case 5: pd_ui_open_tab(ui, PD_TAB_BAG); break;
-    case 6: pd_ui_open_tab(ui, PD_TAB_MAP); break;
-    case 7: pd_ui_open_tab(ui, PD_TAB_SETTINGS); break;
+    case 5: pd_ui_open_tab(ui, PD_TAB_PARTY); break;
+    case 6: pd_ui_open_tab(ui, PD_TAB_BAG); break;
+    case 7: pd_ui_open_tab(ui, PD_TAB_MAP); break;
+    case 8: pd_ui_open_tab(ui, PD_TAB_SETTINGS); break;
     default: break;
     }
+    return true;
 }
 
 static bool run_game(const char* file) {
@@ -1546,9 +1565,9 @@ static bool run_game(const char* file) {
             prevQuickUp = prevQuickDown = prevQuickA = prevQuickB = 0;
         }
         if (g.quickFire >= 0) {
-            quick_do(&ui, g.quickFire, &ffToggled);
+            int row = g.quickFire;
             g.quickFire = -1;
-            g.quick = 0;
+            if (quick_do(&ui, row, &ffToggled, core, &mem, &game, &shown)) g.quick = 0;
             redraw = true;
         }
         if (!g.quick) poll_companion_keys(&ui, kb, g.pad, &leaveHeld, &redraw);
@@ -1575,6 +1594,7 @@ static bool run_game(const char* file) {
             frame++;
         }
         refresh_views(core, &mem, &game);
+        if (mem.iwram && pd_ui_set_battle_menu(&ui, pd_battle_menu(&game, bus_read, &mem))) redraw = true;
         if (frame / SNAPSHOT_EVERY != (frame - (unsigned) frames) / SNAPSHOT_EVERY && mem.ewram && mem.iwram) {
             pd_snapshot_read(&snap, &game, bus_read, &mem);
             pd_ui_update(&ui, &snap);
