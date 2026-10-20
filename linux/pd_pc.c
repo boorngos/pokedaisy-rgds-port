@@ -83,7 +83,8 @@ static bool pc_matches(const struct pd_game* game, const struct pc_rom* pc) {
 
 // Runs a Thumb function and puts the CPU back. Memory writes stay.
 static bool thumb_call(struct mCore* core, uint32_t fn, uint32_t arg0, uint32_t* r0) {
-    if (!core || core->platform != mPLATFORM_GBA || !core->cpu || !core->board || !core->step) return false;
+    if (!core || !core->platform || core->platform(core) != mPLATFORM_GBA || !core->cpu || !core->board || !core->step)
+        return false;
     struct ARMCore* cpu = core->cpu;
     struct GBA* gba = core->board;
     struct ARMRegisterFile saved = cpu->regs;
@@ -101,14 +102,6 @@ static bool thumb_call(struct mCore* core, uint32_t fn, uint32_t arg0, uint32_t*
     enum PrivilegeMode priv = cpu->privilegeMode;
     int32_t savedCycles = cpu->cycles;
     int32_t savedNext = cpu->nextEvent;
-    enum GBAIdleLoopOptimization savedIdle = gba->idleOptimization;
-    bool savedBlocked = gba->cpuBlocked;
-    // One instruction per step, and no idle-loop skip. Otherwise a step runs
-    // the frame's events first and the game takes the CPU back mid-call.
-    cpu->cycles = 0;
-    cpu->nextEvent = 0x10000000;
-    gba->idleOptimization = IDLE_LOOP_IGNORE;
-    gba->cpuBlocked = false;
     gba->haltPending = false;
     cpu->halted = 0;
     cpu->cpsr.i = 1;
@@ -122,6 +115,11 @@ static bool thumb_call(struct mCore* core, uint32_t fn, uint32_t arg0, uint32_t*
     cpu->gprs[ARM_PC] = (int32_t) (fn & ~1u);
     _ARMSetMode(cpu, MODE_THUMB);
     ThumbWritePC(cpu);
+    // _ARMSetMode sets nextEvent = cycles, so the next step would drain every
+    // pending event before the first instruction. Zeroing the clock made that
+    // drain replay the frame from time zero, and the PC function never ran.
+    // Keep the scheduler a long way ahead and step one instruction at a time.
+    if (cpu->cycles <= (int32_t) 0x6FFFFFFF) cpu->nextEvent = cpu->cycles + 0x10000000;
     int ok = 0;
     for (int i = 0; i < 2000000; i++) {
         if (cpu->executionMode == MODE_THUMB &&
@@ -129,13 +127,18 @@ static bool thumb_call(struct mCore* core, uint32_t fn, uint32_t arg0, uint32_t*
             ok = 1;
             break;
         }
+        // A return sets nextEvent = cycles, and the next step would drain the frame.
+        if (cpu->nextEvent - cpu->cycles < 64 && cpu->cycles < 0x7FFFFF00) cpu->nextEvent = cpu->cycles + 256;
         core->step(core);
+    }
+    if (!ok) {
+        fprintf(stderr, "pokedaisy: PC call %08X did not return (pc=%08X)\n", fn, (uint32_t) cpu->gprs[ARM_PC]);
     }
     if (r0) *r0 = (uint32_t) cpu->gprs[0];
     cpu->regs = saved;
     cpu->privilegeMode = priv;
     cpu->executionMode = exec == MODE_ARM ? MODE_THUMB : MODE_ARM;
-    _ARMSetMode(cpu, exec);
+    _ARMSetMode(cpu, exec); // sets nextEvent = cycles; put the clock back after it
     cpu->prefetch[0] = prefetch0;
     cpu->prefetch[1] = prefetch1;
     cpu->cycles = savedCycles;
@@ -146,8 +149,6 @@ static bool thumb_call(struct mCore* core, uint32_t fn, uint32_t arg0, uint32_t*
     gba->idleLoop = idleLoop;
     gba->lastJump = lastJump;
     gba->haltPending = haltPending;
-    gba->idleOptimization = savedIdle;
-    gba->cpuBlocked = savedBlocked;
     gba->idleDetectionStep = idleStep;
     gba->idleDetectionFailures = idleFailures;
     memcpy(gba->cachedRegisters, cached, sizeof(cached));
@@ -175,7 +176,7 @@ bool pd_pc_open(struct mCore* core, const struct pd_game* game, uint8_t* ewram, 
         fprintf(stderr, "pokedaisy: PC: could not ask if the field is free\n");
         return false;
     }
-    if (locked) {
+    if (locked & 0xFFu) {
         fprintf(stderr, "pokedaisy: PC: the player is in a menu or a script\n");
         return false;
     }
@@ -183,7 +184,8 @@ bool pd_pc_open(struct mCore* core, const struct pd_game* game, uint8_t* ewram, 
         0x69, 0x25, (uint8_t) pc->special, (uint8_t) (pc->special >> 8), 0x27, 0x6B, 0x02,
     };
     memcpy(ewram + (PC_SCRIPT - 0x02000000u), script, sizeof(script));
-    if (!thumb_call(core, pc->setup, PC_SCRIPT, NULL)) {
+    uint32_t started = 0;
+    if (!thumb_call(core, pc->setup, PC_SCRIPT, &started) || (started & 0xFFu) == 0) {
         fprintf(stderr, "pokedaisy: PC: the game did not start the box\n");
         return false;
     }

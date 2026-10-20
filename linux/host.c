@@ -1526,7 +1526,7 @@ static bool run_game(const char* file) {
     g.quick = 0;
     g.quickFire = -1;
     drv_stop();
-    bool redraw = true, touching = false, leave = false, ffToggled = false;
+    bool redraw = true, touching = false, leave = false, ffToggled = false, quickRelease = false;
     int leaveHeld = 0;
     unsigned frame = 0, fpsFrames = 0;
     Uint32 fpsStart = SDL_GetTicks();
@@ -1567,7 +1567,12 @@ static bool run_game(const char* file) {
         if (g.quickFire >= 0) {
             int row = g.quickFire;
             g.quickFire = -1;
-            if (quick_do(&ui, row, &ffToggled, core, &mem, &game, &shown)) g.quick = 0;
+            if (quick_do(&ui, row, &ffToggled, core, &mem, &game, &shown)) {
+                g.quick = 0;
+                // The press that chose the row is still down. Held into the game,
+                // it confirms the first PC line (or the START menu) on the same frame.
+                quickRelease = true;
+            }
             redraw = true;
         }
         if (!g.quick) poll_companion_keys(&ui, kb, g.pad, &leaveHeld, &redraw);
@@ -1581,7 +1586,9 @@ static bool run_game(const char* file) {
             g.audioMuted = ff;
             redraw = true;
         }
-        uint32_t player = g.quick ? 0 : (keys_from_keyboard(kb) | keys_from_pad(g.pad, g.nintendo));
+        uint32_t rawKeys = keys_from_keyboard(kb) | keys_from_pad(g.pad, g.nintendo);
+        if (quickRelease && (rawKeys & (GBA_A | GBA_B)) == 0) quickRelease = false;
+        uint32_t player = (g.quick || quickRelease) ? 0 : rawKeys;
         drv.game = &game;
         drv.mem = &mem;
         if (player && (drv.n || drv.phase)) drv_stop();
