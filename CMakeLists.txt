@@ -91,6 +91,7 @@ add_executable(pokedaisy
     linux/host.c
     linux/pd_pc.c
     linux/pd_png.c
+    linux/pd_ra.c
     linux/pd_zip.c
     linux/pd_sha1.c
     third_party/tinf/tinflate.c
@@ -113,6 +114,9 @@ target_compile_definitions(pokedaisy PRIVATE
 
 target_compile_options(pokedaisy PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_link_libraries(pokedaisy PRIVATE mgba ${PD_SDL_TARGET} m pthread)
+if(NOT WIN32)
+    target_link_libraries(pokedaisy PRIVATE dl)
+endif()
 
 if(TARGET SDL2::SDL2main)
     target_link_libraries(pokedaisy PRIVATE SDL2::SDL2main)

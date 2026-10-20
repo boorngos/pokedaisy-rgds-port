@@ -7,6 +7,7 @@
 
 #include "pd_style.h"
 #include "pd_ui_internal.h"
+#include "pd_ra_form.h"
 
 #define TITLE_H 24
 #define LIST_Y (CONTENT_Y + TITLE_H + 4)
@@ -120,6 +121,8 @@ void ui_settings_tab(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game
             "firered leafgreen emerald ruby sapphire colour");
     snprintf(buf, sizeof(buf), "%dx", ui->settings->ffSpeed);
     setting(ui, c, ix, &y, iw, viewTop, viewBot, SETTING_FF, "FAST-FORWARD", buf, "turbo speed");
+    setting(ui, c, ix, &y, iw, viewTop, viewBot, SETTING_RA, "RETROACHIEVEMENTS",
+            ui->settings->raToken[0] ? ui->settings->raUser : "SIGN IN", "cheevos login account");
     setting(ui, c, ix, &y, iw, viewTop, viewBot, SETTING_SAVE_STATE, "SAVE STATE", NULL, "savestate");
     if (host && host->hasState) {
         setting(ui, c, ix, &y, iw, viewTop, viewBot, SETTING_LOAD_STATE, "LOAD STATE", host->stateWhen, "savestate");
@@ -183,6 +186,12 @@ static void confirm(struct pd_ui* ui, struct pd_canvas* c, const char* title, co
 
 void ui_overlay(struct pd_ui* ui, struct pd_canvas* c) {
     if (ui->overlay == PD_OVERLAY_NONE) return;
+    if (ui->overlay == PD_OVERLAY_RA) {
+        pd_dim(c, 0xE6);
+        pd_ra_form_draw(c, ui->settings->raUser, ui->settings->raPass, ui->settings->raNote,
+                        ui->settings->raToken[0] != 0, &ui->raNav);
+        return;
+    }
     pd_dim(c, 0xE6);
     // Swallows taps beside the windows (they close the overlay).
     ui_add_hit(ui, 0, 0, c->w, c->h, HIT_SCRIM);

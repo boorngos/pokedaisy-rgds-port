@@ -34,16 +34,18 @@
 #include "pd_menu.h"
 #include "pd_pc.h"
 #include "pd_png.h"
+#include "pd_ra.h"
 #include "pd_romart.h"
 #include "pd_settings.h"
 #include "pd_setup.h"
 #include "pd_sha1.h"
+#include "pd_tables.h"
 #include "pd_snapshot.h"
 #include "pd_style.h"
 #include "pd_ui.h"
 #include "pd_zip.h"
 
-#define QUICK_N 9
+#define QUICK_N 6
 
 #define RG_W 640
 #define RG_H 480
@@ -122,6 +124,8 @@ struct app {
     int quick;
     int quickSel;
     int quickFire;
+    int wildOpen;
+    int wildSel;
     char shotPath[PATH_MAX];
 };
 
@@ -520,7 +524,7 @@ static uint32_t shade_pixel(uint32_t p, int mode, int x, int y) {
 }
 
 static void present_screens(struct video* v, int screenMode, const uint32_t* game, const uint32_t* ui, int uiDirty,
-                            const char* status, int shader, const struct hud_view* hud) {
+                            const char* status, int shader, const struct hud_view* hud, const uint32_t* cover) {
     if (game && v->texGame) {
         for (int y = 0; y < GBA_H; y++) {
             for (int x = 0; x < GBA_W; x++) {
@@ -589,8 +593,14 @@ static void present_screens(struct video* v, int screenMode, const uint32_t* gam
         dst.x = (topW - dst.w) / 2;
         dst.y = areaY + (areaH - dst.h) / 2;
     }
-    SDL_RenderCopy(v->renTop, v->texGame, NULL, &dst);
-    if (hud && hud->count > 0 && v->texHud && dst.x >= 76) {
+    if (cover && v->texMenu) {
+        static uint32_t argb[PD_UI_WIDTH * PD_UI_HEIGHT];
+        for (int i = 0; i < PD_UI_WIDTH * PD_UI_HEIGHT; i++) argb[i] = 0xFF000000u | cover[i];
+        SDL_UpdateTexture(v->texMenu, NULL, argb, PD_UI_WIDTH * 4);
+        SDL_Rect coverDst = { 0, areaY, topW, areaH };
+        SDL_RenderCopy(v->renTop, v->texMenu, NULL, &coverDst);
+    } else SDL_RenderCopy(v->renTop, v->texGame, NULL, &dst);
+    if (!cover && hud && hud->count > 0 && v->texHud && dst.x >= 76) {
         static uint32_t hudPx[72 * 120];
         struct pd_canvas hc;
         pd_canvas_init(&hc, 72, 120, hudPx);
@@ -1173,9 +1183,10 @@ static void poll_companion_keys(struct pd_ui* ui, const Uint8* kb, SDL_GameContr
     prevX = x; prevY = y; prevTab = tab; prevBack = back;
 }
 
-static void apply_actions(struct pd_ui* ui, struct pd_host_info* host, bool* ffToggled, bool* leave,
+static bool apply_actions(struct pd_ui* ui, struct pd_host_info* host, bool* ffToggled, bool* leave,
                           struct mCore* core, const char* statePath, const char* savePath, const char* base) {
-    switch (pd_ui_take_action(ui)) {
+    enum pd_action action = pd_ui_take_action(ui);
+    switch (action) {
     case PD_ACTION_TOGGLE_FF: *ffToggled = !*ffToggled; break;
     case PD_ACTION_SAVE_STATE:
         if (core) save_state(core, statePath);
@@ -1224,19 +1235,33 @@ static void apply_actions(struct pd_ui* ui, struct pd_host_info* host, bool* ffT
         drv.mon = ui->actionArg4;
         drv_arm(PH_WAIT_BAG);
         break;
+    case PD_ACTION_RA_LOGIN: {
+        char token[48], err[64];
+        if (pd_ra_login(ui->settings->raUser, ui->settings->raPass, token, sizeof(token), err, sizeof(err))) {
+            snprintf(ui->settings->raToken, sizeof(ui->settings->raToken), "%s", token);
+            snprintf(ui->settings->raNote, sizeof(ui->settings->raNote), "Signed in.");
+            pd_settings_save(ui->settings, g.paths.settings);
+        } else {
+            snprintf(ui->settings->raNote, sizeof(ui->settings->raNote), "%s", err);
+        }
+        ui->settings->raPass[0] = 0;
+        break;
+    }
     case PD_ACTION_NONE: break;
     }
+    return action != PD_ACTION_NONE;
 }
 
 static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui, bool* redraw, bool* touching) {
     if (e->type == SDL_QUIT) { g.running = false; return true; }
     if (e->type == SDL_CONTROLLERDEVICEADDED) open_first_pad();
-    if (e->type == SDL_TEXTINPUT && ui && ui->tab == PD_TAB_SETTINGS && ui->overlay == PD_OVERLAY_NONE) {
+    if (e->type == SDL_TEXTINPUT && ui && ui->tab == PD_TAB_SETTINGS &&
+        (ui->overlay == PD_OVERLAY_NONE || ui->overlay == PD_OVERLAY_RA)) {
         if (e->text.text[0]) pd_ui_search_type(ui, (unsigned char) e->text.text[0]);
         *redraw = true;
     }
     if (e->type == SDL_KEYDOWN && e->key.keysym.sym == SDLK_BACKSPACE && ui && ui->tab == PD_TAB_SETTINGS &&
-        ui->overlay == PD_OVERLAY_NONE) {
+        (ui->overlay == PD_OVERLAY_NONE || ui->overlay == PD_OVERLAY_RA)) {
         pd_ui_search_type(ui, -1);
         *redraw = true;
     }
@@ -1253,14 +1278,10 @@ static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui,
         if (!win) win = v->stacked ? v->winTop : v->winBot;
         int ox, oy, onUi;
         map_touch(v, win, mx, my, &ox, &oy, &onUi);
-        if (g.quick && onUi) {
+        if (g.quick && g.wildOpen && onUi) {
             bool down = (buttons & SDL_BUTTON_LMASK) != 0;
             if (e->type == SDL_MOUSEBUTTONUP) down = false;
             if (e->type == SDL_MOUSEBUTTONDOWN) down = true;
-            if (!down) {
-                int row = pd_quick_row_at(ox, oy, QUICK_N);
-                if (row >= 0) { g.quickSel = row; g.quickFire = row; }
-            }
             *redraw = true;
             *touching = down;
             return false;
@@ -1278,13 +1299,11 @@ static bool handle_global_event(SDL_Event* e, struct video* v, struct pd_ui* ui,
         if (v->rgdsTouch || !v->stacked) {
             /* The glass is the bottom LCD. Its events are not tied to winBot. */
             finger_to_ui(v, e->tfinger.x, e->tfinger.y, &ox, &oy, &onUi);
-            if (g.quick && onUi && e->type == SDL_FINGERUP) {
-                int row = pd_quick_row_at(ox, oy, QUICK_N);
-                if (row >= 0) { g.quickSel = row; g.quickFire = row; }
+            if (g.quick && g.wildOpen && onUi) {
                 *redraw = true;
+                *touching = e->type != SDL_FINGERUP;
                 return false;
             }
-            if (g.quick && onUi) { *redraw = true; *touching = e->type != SDL_FINGERUP; return false; }
         } else {
             SDL_Window* win = SDL_GetWindowFromID((Uint32) e->tfinger.windowID);
             if (!win) win = v->winTop;
@@ -1353,10 +1372,10 @@ static bool run_demo(const char* kind) {
         lastTick = now;
         if (redraw) {
             pd_ui_draw(&ui, &bottom, &game, &snap, &host);
-            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 1, NULL, 0, NULL);
+            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 1, NULL, 0, NULL, NULL);
             redraw = false;
         } else {
-            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 0, NULL, 0, NULL);
+            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 0, NULL, 0, NULL, NULL);
         }
         SDL_Delay(16);
     }
@@ -1405,35 +1424,84 @@ static void fill_hud(struct hud_view* hud, const struct pd_snapshot* s) {
     }
 }
 
+enum { Q_PC, Q_FLY, Q_WILD, Q_SAVE, Q_LOAD, Q_FF };
+
 static const char* const QUICK_ITEMS[] = {
-    "PC", "FAST-FORWARD", "SAVE STATE", "LOAD STATE", "ZOOM", "PARTY", "BAG", "MAP", "SETTINGS",
+    "PC", "FLY", "WILD", "SAVE STATE", "LOAD STATE", "FF",
 };
 _Static_assert(sizeof(QUICK_ITEMS) / sizeof(QUICK_ITEMS[0]) == QUICK_N, "quick menu size");
 
-// False only when PC could not open, so the menu stays up.
-static bool quick_do(struct pd_ui* ui, int row, bool* ffToggled, struct mCore* core, struct game_mem* mem,
-                     const struct pd_game* game, const struct pd_snapshot* snap) {
+static int party_knows_fly(const struct pd_snapshot* snap) {
+    if (!snap || !snap->valid) return 0;
+    for (int i = 0; i < snap->partyCount && i < 6; i++) {
+        if (snap->party[i].species <= 0 || snap->party[i].species == PD_SPECIES_EGG) continue;
+        for (int m = 0; m < 4; m++)
+            if (snap->party[i].moves[m] == 19) return 1;
+    }
+    return 0;
+}
+
+// Why the aimed tile can't run, or the WILD banner. NULL hides the middle.
+static const char* quick_note(int row, const struct pd_snapshot* snap, int hasState) {
+    int battle = snap && snap->inBattle;
     switch (row) {
-    case 0:
+    case Q_PC: return battle ? "Not during a battle" : NULL;
+    case Q_FLY:
+        if (battle) return "Not during a battle";
+        if (!party_knows_fly(snap)) return "No one knows FLY";
+        return NULL;
+    case Q_WILD: return "WILD ENCOUNTERS";
+    case Q_LOAD: return hasState ? NULL : "none yet";
+    default: return NULL;
+    }
+}
+
+static unsigned quick_blocked(const struct pd_snapshot* snap, int hasState) {
+    unsigned b = 0;
+    if (quick_note(Q_PC, snap, hasState)) b |= 1u << Q_PC;
+    if (quick_note(Q_FLY, snap, hasState)) b |= 1u << Q_FLY;
+    if (quick_note(Q_LOAD, snap, hasState)) b |= 1u << Q_LOAD;
+    return b;
+}
+
+// False when the tile could not run, so the wheel stays up.
+static bool quick_do(struct pd_ui* ui, int row, bool* ffToggled, struct mCore* core, struct game_mem* mem,
+                     const struct pd_game* game, const struct pd_snapshot* snap, int hasState) {
+    if (quick_blocked(snap, hasState) & (1u << row)) return false;
+    switch (row) {
+    case Q_PC:
         if (!pd_pc_open(core, game, mem->ewram, mem->ewramSize, snap && snap->inBattle)) {
             fprintf(stderr, "pokedaisy: the PC isn't available right now\n");
             return false;
         }
         break;
-    case 1: *ffToggled = !*ffToggled; break;
-    case 2: ui->action = PD_ACTION_SAVE_STATE; break;
-    case 3: ui->action = PD_ACTION_LOAD_STATE; break;
-    case 4:
-        g.settings.screenMode = (g.settings.screenMode + 1) % PD_SCREEN_MODES;
-        pd_settings_save(&g.settings, g.paths.settings);
-        break;
-    case 5: pd_ui_open_tab(ui, PD_TAB_PARTY); break;
-    case 6: pd_ui_open_tab(ui, PD_TAB_BAG); break;
-    case 7: pd_ui_open_tab(ui, PD_TAB_MAP); break;
-    case 8: pd_ui_open_tab(ui, PD_TAB_SETTINGS); break;
+    case Q_FLY: pd_ui_open_tab(ui, PD_TAB_MAP); break;
+    case Q_WILD: return false;
+    case Q_SAVE: ui->action = PD_ACTION_SAVE_STATE; break;
+    case Q_LOAD: ui->action = PD_ACTION_LOAD_STATE; break;
+    case Q_FF: *ffToggled = !*ffToggled; break;
     default: break;
     }
     return true;
+}
+
+// The wheel sits on the top screen, over a dimmed copy of the game, the way
+// the Android ring does. 320x240 stretched across that screen.
+static void paint_wheel(uint32_t* dst, const uint32_t* game, int bgr, int shader, const char* const* items, int n,
+                        int sel, const char* note, unsigned blocked) {
+    for (int y = 0; y < PD_UI_HEIGHT; y++) {
+        int sy = y * GBA_H / PD_UI_HEIGHT;
+        for (int x = 0; x < PD_UI_WIDTH; x++) {
+            int sx = x * GBA_W / PD_UI_WIDTH;
+            uint32_t p = game[sy * GBA_W + sx];
+            if (bgr) p = (p & 0xFF00FF00u) | ((p & 0x00FF0000u) >> 16) | ((p & 0x000000FFu) << 16);
+            p = shade_pixel(p, shader, sx, sy);
+            dst[y * PD_UI_WIDTH + x] = p & 0xFFFFFFu;
+        }
+    }
+    struct pd_canvas top;
+    pd_canvas_init(&top, PD_UI_WIDTH, PD_UI_HEIGHT, dst);
+    pd_quick_draw(&top, items, n, sel, note, blocked);
 }
 
 static bool run_game(const char* file) {
@@ -1542,7 +1610,12 @@ static bool run_game(const char* file) {
         static int prevL3, prevR3, prevQuickUp, prevQuickDown, prevQuickA, prevQuickB;
         int l3 = pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_LEFTSTICK) || kb[SDL_SCANCODE_F1];
         int r3 = pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_RIGHTSTICK) || kb[SDL_SCANCODE_F2];
-        if (l3 && !prevL3) { g.quick = !g.quick; g.quickSel = 0; redraw = true; }
+        if (l3 && !prevL3) {
+            g.quick = !g.quick;
+            g.quickSel = 0;
+            g.wildOpen = 0;
+            redraw = true;
+        }
         if (r3 && !prevR3 && !g.quick) {
             g.settings.screenMode = (g.settings.screenMode + 1) % PD_SCREEN_MODES;
             pd_settings_save(&g.settings, g.paths.settings);
@@ -1553,21 +1626,67 @@ static bool run_game(const char* file) {
         if (g.quick) {
             int up = kb[SDL_SCANCODE_UP] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_UP);
             int down = kb[SDL_SCANCODE_DOWN] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+            int left = kb[SDL_SCANCODE_LEFT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+            int right = kb[SDL_SCANCODE_RIGHT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
             int a = kb[SDL_SCANCODE_RETURN] || kb[SDL_SCANCODE_Z] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_A);
             int b = kb[SDL_SCANCODE_X] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_B) ||
                     pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_Y);
-            if (up && !prevQuickUp) { g.quickSel = (g.quickSel + QUICK_N - 1) % QUICK_N; redraw = true; }
-            if (down && !prevQuickDown) { g.quickSel = (g.quickSel + 1) % QUICK_N; redraw = true; }
-            if (a && !prevQuickA) g.quickFire = g.quickSel;
-            if (b && !prevQuickB) { g.quick = 0; redraw = true; }
-            prevQuickUp = up; prevQuickDown = down; prevQuickA = a; prevQuickB = b;
+            if (g.wildOpen) {
+                int dir = 0;
+                if ((up || left) && !prevQuickUp) dir = -1;
+                if ((down || right) && !prevQuickDown) dir = 1;
+                if (g.pad) {
+                    Sint16 ay = SDL_GameControllerGetAxis(g.pad, SDL_CONTROLLER_AXIS_LEFTY);
+                    static Uint32 wildNext;
+                    if (ay < -12000 || ay > 12000) {
+                        Uint32 now = SDL_GetTicks();
+                        if (now >= wildNext) {
+                            dir = ay > 0 ? 1 : -1;
+                            wildNext = now + 160;
+                        }
+                    } else {
+                        wildNext = 0;
+                    }
+                }
+                if (dir) {
+                    g.wildSel = pd_wild_move(&game, &shown, g.wildSel, dir);
+                    redraw = true;
+                }
+                if (b && !prevQuickB) { g.wildOpen = 0; redraw = true; }
+            } else {
+                if ((up || left) && !prevQuickUp) {
+                    g.quickSel = (g.quickSel + QUICK_N - 1) % QUICK_N;
+                    redraw = true;
+                }
+                if ((down || right) && !prevQuickDown) {
+                    g.quickSel = (g.quickSel + 1) % QUICK_N;
+                    redraw = true;
+                }
+                if (g.pad) {
+                    int aim = pd_quick_aim(SDL_GameControllerGetAxis(g.pad, SDL_CONTROLLER_AXIS_LEFTX),
+                                           SDL_GameControllerGetAxis(g.pad, SDL_CONTROLLER_AXIS_LEFTY), QUICK_N);
+                    if (aim >= 0 && aim != g.quickSel) {
+                        g.quickSel = aim;
+                        redraw = true;
+                    }
+                }
+                if (a && !prevQuickA) g.quickFire = g.quickSel;
+                if (b && !prevQuickB) { g.quick = 0; redraw = true; }
+            }
+            prevQuickUp = up || left;
+            prevQuickDown = down || right;
+            prevQuickA = a;
+            prevQuickB = b;
         } else {
             prevQuickUp = prevQuickDown = prevQuickA = prevQuickB = 0;
         }
         if (g.quickFire >= 0) {
             int row = g.quickFire;
             g.quickFire = -1;
-            if (quick_do(&ui, row, &ffToggled, core, &mem, &game, &shown)) {
+            if (row == Q_WILD) {
+                g.wildOpen = 1;
+                g.wildSel = pd_wild_move(&game, &shown, 0, 0);
+            } else if (quick_do(&ui, row, &ffToggled, core, &mem, &game, &shown, host.hasState)) {
                 g.quick = 0;
                 // The press that chose the row is still down. Held into the game,
                 // it confirms the first PC line (or the START menu) on the same frame.
@@ -1577,7 +1696,28 @@ static bool run_game(const char* file) {
         }
         if (!g.quick) poll_companion_keys(&ui, kb, g.pad, &leaveHeld, &redraw);
         if (leaveHeld >= LEAVE_HOLD) break;
-        apply_actions(&ui, &host, &ffToggled, &leave, core, statePath, savePath, base);
+        if (ui.overlay == PD_OVERLAY_RA && !g.quick) {
+            static int raU, raD, raL, raR, raA;
+            int ru = kb[SDL_SCANCODE_UP] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_UP);
+            int rd = kb[SDL_SCANCODE_DOWN] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+            int rl = kb[SDL_SCANCODE_LEFT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+            int rr = kb[SDL_SCANCODE_RIGHT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+            int ra = kb[SDL_SCANCODE_RETURN] || kb[SDL_SCANCODE_Z] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_A);
+            int dir = 0;
+            if (ru && !raU) dir = 1;
+            else if (rd && !raD) dir = 2;
+            else if (rl && !raL) dir = 3;
+            else if (rr && !raR) dir = 4;
+            else if (ra && !raA) dir = 5;
+            if (dir && pd_ui_ra_key(&ui, dir)) redraw = true;
+            else if (dir) redraw = true;
+            raU = ru;
+            raD = rd;
+            raL = rl;
+            raR = rr;
+            raA = ra;
+        }
+        if (apply_actions(&ui, &host, &ffToggled, &leave, core, statePath, savePath, base)) redraw = true;
         if (leave) break;
 
         bool ff = ffToggled || kb[SDL_SCANCODE_SPACE] || pad_ff(g.pad);
@@ -1588,7 +1728,7 @@ static bool run_game(const char* file) {
         }
         uint32_t rawKeys = keys_from_keyboard(kb) | keys_from_pad(g.pad, g.nintendo);
         if (quickRelease && (rawKeys & (GBA_A | GBA_B)) == 0) quickRelease = false;
-        uint32_t player = (g.quick || quickRelease) ? 0 : rawKeys;
+        uint32_t player = (g.quick || quickRelease || ui.overlay == PD_OVERLAY_RA) ? 0 : rawKeys;
         drv.game = &game;
         drv.mem = &mem;
         if (player && (drv.n || drv.phase)) drv_stop();
@@ -1627,13 +1767,19 @@ static bool run_game(const char* file) {
         struct hud_view hud;
         fill_hud(&hud, &shown);
         const struct hud_view* hudPtr = g.settings.hud ? &hud : NULL;
+        const uint32_t* cover = NULL;
+        if (g.quick && !g.wildOpen) {
+            paint_wheel(splashPx, gamePx, g.video.gameBgr, g.settings.shader, QUICK_ITEMS, QUICK_N, g.quickSel,
+                        quick_note(g.quickSel, &shown, host.hasState), quick_blocked(&shown, host.hasState));
+            cover = splashPx;
+        }
         if (redraw) {
             pd_ui_draw(&ui, &bottom, &game, &shown, &host);
-            if (g.quick) pd_quick_draw(&bottom, QUICK_ITEMS, QUICK_N, g.quickSel);
-            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 1, status, g.settings.shader, hudPtr);
+            if (g.quick && g.wildOpen) pd_wild_draw(&bottom, &game, &shown, g.wildSel);
+            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 1, status, g.settings.shader, hudPtr, cover);
             redraw = false;
         } else {
-            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 0, status, g.settings.shader, hudPtr);
+            present_screens(&g.video, g.settings.screenMode, gamePx, uiPx, 0, status, g.settings.shader, hudPtr, cover);
         }
     }
     g.quick = 0;
@@ -1642,6 +1788,18 @@ static bool run_game(const char* file) {
     if (g.audio) SDL_ClearQueuedAudio(g.audio);
     core->deinit(core);
     return g.running;
+}
+
+static void ra_try_login(void) {
+    char token[48], err[64];
+    if (pd_ra_login(g.settings.raUser, g.settings.raPass, token, sizeof(token), err, sizeof(err))) {
+        snprintf(g.settings.raToken, sizeof(g.settings.raToken), "%s", token);
+        snprintf(g.settings.raNote, sizeof(g.settings.raNote), "Signed in.");
+        pd_settings_save(&g.settings, g.paths.settings);
+    } else {
+        snprintf(g.settings.raNote, sizeof(g.settings.raNote), "%s", err);
+    }
+    g.settings.raPass[0] = 0;
 }
 
 static void run_setup(void) {
@@ -1662,17 +1820,27 @@ static void run_setup(void) {
             if (e.type == SDL_QUIT) { g.running = false; break; }
             if (e.type == SDL_CONTROLLERDEVICEADDED) open_first_pad();
             if (e.type == SDL_TEXTINPUT && e.text.text[0]) {
-                pd_setup_type(&setup, (unsigned char) e.text.text[0]);
+                if (pd_setup_ra_open(&setup)) pd_setup_ra_type(&setup, &g.settings, (unsigned char) e.text.text[0]);
+                else pd_setup_type(&setup, (unsigned char) e.text.text[0]);
                 dirty = true;
             }
             if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.sym == SDLK_BACKSPACE) { pd_setup_type(&setup, -1); dirty = true; }
-                if (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_F4) leave = 1;
+                if (e.key.keysym.sym == SDLK_BACKSPACE) {
+                    if (pd_setup_ra_open(&setup)) pd_setup_ra_type(&setup, &g.settings, -1);
+                    else pd_setup_type(&setup, -1);
+                    dirty = true;
+                }
+                if (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_F4) {
+                    if (pd_setup_ra_open(&setup)) pd_setup_ra_close(&setup, &g.settings);
+                    else leave = 1;
+                    dirty = true;
+                }
             }
             if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP) {
                 int ox, oy, onUi;
                 finger_to_ui(&g.video, e.tfinger.x, e.tfinger.y, &ox, &oy, &onUi);
-                if (onUi && pd_setup_touch(&setup, &g.settings, ox, oy, e.type != SDL_FINGERUP)) {
+                if (onUi && !pd_setup_ra_open(&setup) &&
+                    pd_setup_touch(&setup, &g.settings, ox, oy, e.type != SDL_FINGERUP)) {
                     pd_setup_adjust(&setup, &g.settings, 1);
                     dirty = true;
                 }
@@ -1683,28 +1851,49 @@ static void run_setup(void) {
                 SDL_Window* win = SDL_GetMouseFocus();
                 if (!win) win = g.video.winTop;
                 map_touch(&g.video, win, e.button.x, e.button.y, &ox, &oy, &onUi);
-                if (onUi && pd_setup_touch(&setup, &g.settings, ox, oy, e.type == SDL_MOUSEBUTTONDOWN)) {
+                if (onUi && !pd_setup_ra_open(&setup) &&
+                    pd_setup_touch(&setup, &g.settings, ox, oy, e.type == SDL_MOUSEBUTTONDOWN)) {
                     pd_setup_adjust(&setup, &g.settings, 1);
                     dirty = true;
                 }
             }
         }
         const Uint8* kb = SDL_GetKeyboardState(NULL);
-        static int prevUp, prevDown, prevLeft, prevRight, prevB;
+        static int prevUp, prevDown, prevLeft, prevRight, prevB, prevA;
         int up = kb[SDL_SCANCODE_UP] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_UP);
         int down = kb[SDL_SCANCODE_DOWN] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
         int left = kb[SDL_SCANCODE_LEFT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
-        int right = kb[SDL_SCANCODE_RIGHT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
-                    kb[SDL_SCANCODE_RETURN] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_A);
+        int right = kb[SDL_SCANCODE_RIGHT] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+        int a = kb[SDL_SCANCODE_RETURN] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_A);
         int b = kb[SDL_SCANCODE_X] || pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_B) ||
                 pad_pressed(g.pad, SDL_CONTROLLER_BUTTON_Y);
         if (!b) armed = 1;
-        if (up && !prevUp) { pd_setup_move(&setup, &g.settings, -1); dirty = true; }
-        if (down && !prevDown) { pd_setup_move(&setup, &g.settings, 1); dirty = true; }
-        if (left && !prevLeft) { pd_setup_adjust(&setup, &g.settings, -1); dirty = true; }
-        if (right && !prevRight) { pd_setup_adjust(&setup, &g.settings, 1); dirty = true; }
-        if (leave || (armed && b && !prevB)) break;
-        prevUp = up; prevDown = down; prevLeft = left; prevRight = right; prevB = b;
+        if (pd_setup_ra_open(&setup)) {
+            int dir = 0;
+            if (up && !prevUp) dir = 1;
+            else if (down && !prevDown) dir = 2;
+            else if (left && !prevLeft) dir = 3;
+            else if (right && !prevRight) dir = 4;
+            else if (a && !prevA) dir = 5;
+            if (dir) {
+                int r = pd_setup_ra_key(&setup, &g.settings, dir);
+                if (r == 1) ra_try_login();
+                else if (r == 2) pd_settings_save(&g.settings, g.paths.settings);
+                dirty = true;
+            }
+            if (armed && b && !prevB) {
+                pd_setup_ra_close(&setup, &g.settings);
+                dirty = true;
+            }
+        } else {
+            if (up && !prevUp) { pd_setup_move(&setup, &g.settings, -1); dirty = true; }
+            if (down && !prevDown) { pd_setup_move(&setup, &g.settings, 1); dirty = true; }
+            if (left && !prevLeft) { pd_setup_adjust(&setup, &g.settings, -1); dirty = true; }
+            if ((right && !prevRight) || (a && !prevA)) { pd_setup_adjust(&setup, &g.settings, 1); dirty = true; }
+            if (leave || (armed && b && !prevB)) break;
+        }
+        if (leave && !pd_setup_ra_open(&setup)) break;
+        prevUp = up; prevDown = down; prevLeft = left; prevRight = right; prevA = a; prevB = b;
         if (dirty) {
             pd_setup_draw(&setup, &bottom, &g.settings);
             present_menu(&g.video, splashPx, uiPx, 1);
@@ -1826,7 +2015,8 @@ static void usage(void) {
     puts("");
     puts("Controls: D-pad / left stick, A/B, Start, Select, L/R.");
     puts("  X next companion tab, Y back, R2 or Space fast-forward.");
-    puts("  L3 or F1 quick menu, R3 or F2 cycles ORIGINAL / FIT / STRETCH.");
+    puts("  L3 or F1 opens the wheel on the top screen. The left stick aims, A runs the tile.");
+    puts("  R3 or F2 cycles ORIGINAL / FIT / STRETCH.");
     puts("  On the game list, Y or the SETTINGS gear opens settings.");
     puts("  Hold X+Y to leave the game. F11 fullscreen. Esc quits the list.");
 }

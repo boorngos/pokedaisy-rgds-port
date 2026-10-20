@@ -76,15 +76,19 @@ static const struct pd_config FIRERED_REV1 = {
     .probeName = "BROCK",
 };
 
-// FireRed rev 0 and LeafGreen: the tabs that read RAM (and the MAP, whose art
-// is found by fingerprint) and the party icons; their ROM tables for the
-// POKéDEX and the GUIDE's live pages aren't ported yet. The FOE TEAM's
-// addresses are known for rev 1 only (the app's NATIVE_FIRERED_REV0 has none).
+// FireRed rev 0: same RAM as rev 1. gTrainers / learnsets / gWildMonHeaders are
+// retail rev 0's (the app's GUIDE_TABLES for Rocket Edition, which kept them).
+// The FOE TEAM's addresses are known for rev 1 only.
 static const struct pd_config FIRERED_REV0_RAM_ONLY = {
     FIRERED_RAM,
     .monIconTable = 0x083D37A0,
     .monIconPaletteIndices = 0x083D3E80,
     .monIconPaletteTable = 0x083D4038,
+    .trainers = 0x0823EAC8,
+    .learnsets = 0x0825D7B4,
+    .wildHeaders = 0x083C9CB8,
+    .probeTrainer = 414,
+    .probeName = "BROCK",
     // Same layout as rev 1, shifted to where this revision keeps the tables.
     // Bulbasaur's entry is "Seed", 0.7 m, 6.9 kg.
     .dexEntries = 0x0844E850,
@@ -105,6 +109,11 @@ static const struct pd_config LEAFGREEN_REV0_RAM_ONLY = {
     .monIconTable = 0x083D35DC,
     .monIconPaletteIndices = 0x083D3CBC,
     .monIconPaletteTable = 0x083D3E74,
+    .trainers = 0x0823EAA4,
+    .learnsets = 0x0825D794,
+    .wildHeaders = 0x083C9AF4,
+    .probeTrainer = 414,
+    .probeName = "BROCK",
 };
 
 static const struct pd_config LEAFGREEN_REV1_RAM_ONLY = {
@@ -114,6 +123,11 @@ static const struct pd_config LEAFGREEN_REV1_RAM_ONLY = {
     .monIconTable = 0x083D364C,
     .monIconPaletteIndices = 0x083D3D2C,
     .monIconPaletteTable = 0x083D3EE4,
+    .trainers = 0x0823EB14,
+    .learnsets = 0x0825D804,
+    .wildHeaders = 0x083C9B64,
+    .probeTrainer = 414,
+    .probeName = "BROCK",
 };
 
 // NATIVE_EMERALD_RETAIL (English, BPEE; sha1 f3ae0881..., what pret's
@@ -234,6 +248,65 @@ bool pd_rom_read(const struct pd_game* g, uint32_t addr, void* out, size_t len) 
     return true;
 }
 
+// Other-language carts: English's layout, with the tables (and, for FireRed
+// and LeafGreen, a few RAM pointers) moved. From the app's retail ports.
+struct locale_fix {
+    const char* code;
+    uint32_t trainers, learnsets, wildHeaders;
+    const char* probe;
+    uint32_t icon, palIdx, pal;
+    uint32_t gMain, sb1, sb2;
+};
+
+static const struct pd_config* apply_locale(const struct pd_config* base, const char* code) {
+    static const struct locale_fix FIX[] = {
+        { "BPRI", 0x08237B6C, 0x08256894, 0x083C2CC0, "BROCK", 0x083CC270, 0x083CC950, 0x083CCB08, 0x03003040, 0x03004F58,
+          0x03004F5C },
+        { "BPGI", 0x08237B48, 0x08256874, 0x083C2AFC, "BROCK", 0x083CC0AC, 0x083CC78C, 0x083CC944, 0x03003040, 0x03004F58,
+          0x03004F5C },
+        { "BPES", 0x08316294, 0x0832F638, 0x085563A4, "PETRA", 0x0857E784, 0x0857EE64, 0x0857F01C, 0, 0, 0 },
+        { "BPED", 0x083249A0, 0x0833DD3C, 0x08564A78, "FELIZIA", 0x0858CAA8, 0x0858D188, 0x0858D340, 0, 0, 0 },
+        { "BPEF", 0x08317B60, 0x08330EEC, 0x08557C34, "ROXANNE", 0x08580020, 0x08580700, 0x085808B8, 0, 0, 0 },
+        { "BPEI", 0x0830F9F4, 0x08328D7C, 0x0854FA8C, "PETRA", 0x0857838C, 0x08578A6C, 0x08578C24, 0, 0, 0 },
+    };
+    static struct pd_config live;
+    for (size_t i = 0; i < sizeof(FIX) / sizeof(FIX[0]); i++) {
+        if (strcmp(code, FIX[i].code)) continue;
+        live = *base;
+        live.trainers = FIX[i].trainers;
+        live.learnsets = FIX[i].learnsets;
+        live.wildHeaders = FIX[i].wildHeaders;
+        live.probeName = FIX[i].probe;
+        live.monIconTable = FIX[i].icon;
+        live.monIconPaletteIndices = FIX[i].palIdx;
+        live.monIconPaletteTable = FIX[i].pal;
+        if (FIX[i].gMain) {
+            live.gMain = FIX[i].gMain;
+            live.saveBlock1Ptr = FIX[i].sb1;
+            live.saveBlock2Ptr = FIX[i].sb2;
+        }
+        // The dex probe looks for the English word "SEED". These carts say
+        // something else, and the English table addresses are not theirs.
+        live.dexEntries = 0;
+        live.speciesInfo = 0;
+        live.speciesToNational = 0;
+        live.abilityNames = 0;
+        live.frontPics = 0;
+        live.palettes = 0;
+        return &live;
+    }
+    return base;
+}
+
+static int kanto_code(const char* code) {
+    return !strcmp(code, "BPRE") || !strcmp(code, "BPRI") || !strcmp(code, "BPGE") || !strcmp(code, "BPGI");
+}
+
+static int hoenn_code(const char* code) {
+    return !strcmp(code, "BPEE") || !strcmp(code, "BPEI") || !strcmp(code, "BPES") || !strcmp(code, "BPED") ||
+        !strcmp(code, "BPEF");
+}
+
 void pd_game_detect(struct pd_game* g, const uint8_t* header, size_t romSize) {
     static unsigned loads;
     memset(g, 0, sizeof(*g));
@@ -242,16 +315,18 @@ void pd_game_detect(struct pd_game* g, const uint8_t* header, size_t romSize) {
     g->code[4] = 0;
     g->revision = header[0xBC];
 
-    if (!strcmp(g->code, "BPRE") || !strcmp(g->code, "BPGE")) {
+    if (kanto_code(g->code)) {
         g->kind = PD_GAME_FIRERED;
         g->title = g->code[2] == 'R' ? "Pokémon FireRed" : "Pokémon LeafGreen";
-        bool rev1 = g->revision == 1;
-        if (g->code[2] == 'R') g->cfg = rev1 ? &FIRERED_REV1 : &FIRERED_REV0_RAM_ONLY;
-        else g->cfg = rev1 ? &LEAFGREEN_REV1_RAM_ONLY : &LEAFGREEN_REV0_RAM_ONLY;
-    } else if (!strcmp(g->code, "BPEE")) {
+        // The Italian carts are the rev 0 release. Rev 1 tables are English only.
+        bool rev1 = g->revision == 1 && g->code[3] == 'E';
+        const struct pd_config* base = g->code[2] == 'R' ? (rev1 ? &FIRERED_REV1 : &FIRERED_REV0_RAM_ONLY)
+                                                         : (rev1 ? &LEAFGREEN_REV1_RAM_ONLY : &LEAFGREEN_REV0_RAM_ONLY);
+        g->cfg = apply_locale(base, g->code);
+    } else if (hoenn_code(g->code)) {
         g->kind = PD_GAME_EMERALD;
         g->title = "Pokémon Emerald";
-        g->cfg = &EMERALD;
+        g->cfg = apply_locale(&EMERALD, g->code);
     } else {
         g->title = "Unknown game";
         g->unsupported = "Not a game the companion knows yet";

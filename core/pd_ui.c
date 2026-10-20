@@ -1,6 +1,7 @@
 // The companion's frame: the tab bar, the open tab, overlays, and the stylus.
 // Each tab draws itself in its own file (pd_ui_party.c, _battle, _bag,
 // _settings); pd_ui_internal.h has what they share.
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -194,6 +195,13 @@ static void act(struct pd_ui* ui, int id) {
         return;
     }
     if (ui->overlay != PD_OVERLAY_NONE) {
+        if (ui->overlay == PD_OVERLAY_RA) {
+            if (id == HIT_NO || id == HIT_SCRIM) {
+                ui->settings->raPass[0] = 0;
+                ui->overlay = PD_OVERLAY_NONE;
+            }
+            return;
+        }
         if (id >= HIT_OPTION && id < HIT_OPTION + 16) {
             int i = id - HIT_OPTION;
             if (ui->overlay == PD_OVERLAY_PICK_SCREEN && i < PD_SCREEN_MODES) ui->settings->screenMode = i;
@@ -246,9 +254,14 @@ static void act(struct pd_ui* ui, int id) {
         } else if (row == SETTING_HUD) {
             ui->settings->hud = !ui->settings->hud;
             ui->action = PD_ACTION_SETTINGS_CHANGED;
-        } else if (row == SETTING_BATTLE_BTNS) {
+        }         else if (row == SETTING_BATTLE_BTNS) {
             ui->settings->battleButtons = !ui->settings->battleButtons;
             ui->action = PD_ACTION_SETTINGS_CHANGED;
+        } else if (row == SETTING_RA) {
+            pd_ra_nav_init(&ui->raNav);
+            ui->settings->raPass[0] = 0;
+            ui->settings->raNote[0] = 0;
+            ui->overlay = PD_OVERLAY_RA;
         }
     }
 }
@@ -309,6 +322,10 @@ void pd_ui_open_tab(struct pd_ui* ui, enum pd_tab tab) {
 }
 
 void pd_ui_search_type(struct pd_ui* ui, int ch) {
+    if (ui->overlay == PD_OVERLAY_RA) {
+        pd_ui_ra_type(ui, ch);
+        return;
+    }
     if (ui->tab != PD_TAB_SETTINGS || ui->overlay != PD_OVERLAY_NONE) return;
     size_t n = strlen(ui->settingsQuery);
     if (ch == -1) {
@@ -318,6 +335,33 @@ void pd_ui_search_type(struct pd_ui* ui, int ch) {
         ui->settingsQuery[n + 1] = 0;
     }
     ui->settingsScroll = 0;
+}
+
+void pd_ui_ra_type(struct pd_ui* ui, int ch) {
+    if (!ui->settings || ui->overlay != PD_OVERLAY_RA) return;
+    pd_ra_form_type(ui->settings->raUser, (int) sizeof(ui->settings->raUser), ui->settings->raPass,
+                    (int) sizeof(ui->settings->raPass), &ui->raNav, ch);
+}
+
+int pd_ui_ra_key(struct pd_ui* ui, int dir) {
+    if (!ui->settings || ui->overlay != PD_OVERLAY_RA) return 0;
+    int r = pd_ra_form_key(ui->settings->raUser, (int) sizeof(ui->settings->raUser), ui->settings->raPass,
+                           (int) sizeof(ui->settings->raPass), &ui->raNav, dir);
+    if (r == 2) {
+        ui->settings->raToken[0] = 0;
+        ui->settings->raPass[0] = 0;
+        snprintf(ui->settings->raNote, sizeof(ui->settings->raNote), "Signed out.");
+        ui->action = PD_ACTION_SETTINGS_CHANGED;
+        return 0;
+    }
+    if (r == 1) {
+        if (!ui->settings->raUser[0] || !ui->settings->raPass[0]) {
+            snprintf(ui->settings->raNote, sizeof(ui->settings->raNote), "Type a username and a password.");
+            return 0;
+        }
+        ui->action = PD_ACTION_RA_LOGIN;
+    }
+    return r;
 }
 
 void pd_ui_next_tab(struct pd_ui* ui, int dir) {
@@ -340,6 +384,7 @@ bool pd_ui_back(struct pd_ui* ui) {
     // The GUIDE's notice: BACK is its GO BACK.
     if (ui->overlay == PD_OVERLAY_GUIDE_NOTICE) return ui_guide_act(ui, HIT_NOTICE_BACK);
     if (ui->overlay != PD_OVERLAY_NONE) {
+        if (ui->overlay == PD_OVERLAY_RA) ui->settings->raPass[0] = 0;
         ui->overlay = PD_OVERLAY_NONE;
         return true;
     }

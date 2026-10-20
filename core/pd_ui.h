@@ -15,6 +15,7 @@
 
 #include "pd_canvas.h"
 #include "pd_game.h"
+#include "pd_ra_form.h"
 #include "pd_snapshot.h"
 
 #define PD_UI_WIDTH 320
@@ -63,6 +64,12 @@ struct pd_settings {
     int battleButtons; // the battle screen's FIGHT / BAG / POKéMON / RUN
     int shader;        // enum pd_shader
     int theme;         // library and settings colours
+    // RetroAchievements. The token is what a sign-in returned; the password
+    // is only held until that attempt and is never written to the file.
+    char raUser[32];
+    char raToken[48];
+    char raPass[32];
+    char raNote[64];
 };
 
 enum pd_action {
@@ -72,6 +79,7 @@ enum pd_action {
     PD_ACTION_LOAD_STATE,
     PD_ACTION_LEAVE_GAME,
     PD_ACTION_SETTINGS_CHANGED,
+    PD_ACTION_RA_LOGIN,
     PD_ACTION_BATTLE_FIGHT,
     PD_ACTION_BATTLE_PKMN,
     PD_ACTION_BATTLE_RUN,
@@ -113,6 +121,7 @@ enum pd_overlay {
     PD_OVERLAY_CONFIRM_LEAVE,
     PD_OVERLAY_PLACES,       // the MAP's list of places
     PD_OVERLAY_GUIDE_NOTICE, // the GUIDE's "AI-written, may be wrong" notice
+    PD_OVERLAY_RA,           // RETROACHIEVEMENTS sign-in
 };
 
 struct pd_ui {
@@ -172,6 +181,7 @@ struct pd_ui {
     int hitCount;
     int settingsScroll; // SETTINGS list, in pixels
     char settingsQuery[24];
+    struct pd_ra_nav raNav;
 };
 
 void pd_ui_init(struct pd_ui* ui, struct pd_settings* settings);
@@ -187,6 +197,11 @@ void pd_ui_open_tab(struct pd_ui* ui, enum pd_tab tab);
 bool pd_ui_back(struct pd_ui* ui);
 // SETTINGS search: ch > 0 appends, -1 deletes one character.
 void pd_ui_search_type(struct pd_ui* ui, int ch);
+// RETROACHIEVEMENTS page: ch > 0 types, ch < 0 deletes. dir is a gamepad
+// press (1 up, 2 down, 3 left, 4 right, 5 accept) and returns 1 to sign in
+// or 2 to sign out.
+void pd_ui_ra_type(struct pd_ui* ui, int ch);
+int pd_ui_ra_key(struct pd_ui* ui, int dir);
 // The last thing the player asked the host for (once), or PD_ACTION_NONE.
 enum pd_action pd_ui_take_action(struct pd_ui* ui);
 // The game's battle menu changed. Closes a local pane the game has left.

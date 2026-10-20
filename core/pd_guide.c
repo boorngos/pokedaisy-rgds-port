@@ -20,7 +20,7 @@ static uint32_t u32(const uint8_t* p) {
 
 const struct pd_guide* pd_guide_for(const struct pd_game* g) {
     if (g->kind == PD_GAME_EMERALD) return &pd_guide_emerald;
-    if (g->kind == PD_GAME_FIRERED) return !strcmp(g->code, "BPGE") ? &pd_guide_leafgreen : &pd_guide_firered;
+    if (g->kind == PD_GAME_FIRERED) return g->code[2] == 'G' ? &pd_guide_leafgreen : &pd_guide_firered;
     return NULL;
 }
 
@@ -30,7 +30,7 @@ const struct pd_area_thing* pd_areas_for(const struct pd_game* g, int* count) {
         return pd_areas_emerald;
     }
     if (g->kind == PD_GAME_FIRERED) {
-        bool lg = !strcmp(g->code, "BPGE");
+        bool lg = g->code[2] == 'G';
         *count = lg ? pd_areas_leafgreen_count : pd_areas_firered_count;
         return lg ? pd_areas_leafgreen : pd_areas_firered;
     }

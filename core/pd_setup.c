@@ -18,11 +18,12 @@ enum {
     SET_SHADER,
     SET_THEME,
     SET_FF,
+    SET_RA,
     SET_COUNT,
 };
 
 static const char* const LABELS[SET_COUNT] = {
-    "ASPECT", "STATUS BAR", "HUD", "BATTLE BUTTONS", "SHADER", "THEME", "FAST-FORWARD",
+    "ASPECT", "STATUS BAR", "HUD", "BATTLE BUTTONS", "SHADER", "THEME", "FAST-FORWARD", "RETROACHIEVEMENTS",
 };
 
 // Words the search matches besides the label itself.
@@ -34,6 +35,7 @@ static const char* const ALIASES[SET_COUNT] = {
     "lcd scanlines crt filter color gba",
     "firered leafgreen emerald ruby sapphire colour color",
     "turbo speed fast forward",
+    "retroachievements cheevos login account",
 };
 
 static int contains(const char* hay, const char* needle) {
@@ -69,6 +71,7 @@ static const char* value_of(const struct pd_settings* set, int id, char* buf, si
     case SET_SHADER: return pd_shader_name(set->shader);
     case SET_THEME: return pd_theme_name(set->theme);
     case SET_FF: snprintf(buf, len, "%dx", set->ffSpeed); return buf;
+    case SET_RA: return set->raToken[0] ? set->raUser : "SIGN IN";
     default: return "";
     }
 }
@@ -83,6 +86,11 @@ static int list_top(void) {
 }
 
 void pd_setup_draw(struct pd_setup* s, struct pd_canvas* c, const struct pd_settings* set) {
+    if (s->account) {
+        pd_backdrop(c);
+        pd_ra_form_draw(c, set->raUser, set->raPass, set->raNote, set->raToken[0] != 0, &s->ra);
+        return;
+    }
     pd_backdrop(c);
     int x = MARGIN, w = c->w - 2 * MARGIN;
     int f = pd_title_box(c, x, MARGIN, w, TITLE_H, PD_TITLE_FILL);
@@ -154,11 +162,18 @@ void pd_setup_adjust(struct pd_setup* s, struct pd_settings* set, int dir) {
         set->ffSpeed = PD_FF_MIN + (i + span + d) % span;
         break;
     }
+    case SET_RA:
+        s->account = true;
+        pd_ra_nav_init(&s->ra);
+        set->raPass[0] = 0;
+        set->raNote[0] = 0;
+        break;
     default: break;
     }
 }
 
 void pd_setup_type(struct pd_setup* s, int ch) {
+    if (s->account) return;
     size_t n = strlen(s->query);
     if (ch == -2) s->query[0] = 0;
     else if (ch == -1) {
@@ -194,4 +209,34 @@ int pd_setup_touch(struct pd_setup* s, const struct pd_settings* set, int x, int
         return 1;
     }
     return 0;
+}
+
+int pd_setup_ra_open(const struct pd_setup* s) {
+    return s->account;
+}
+
+int pd_setup_ra_key(struct pd_setup* s, struct pd_settings* set, int dir) {
+    if (!s->account) return 0;
+    int r = pd_ra_form_key(set->raUser, (int) sizeof(set->raUser), set->raPass, (int) sizeof(set->raPass), &s->ra, dir);
+    if (r == 2) {
+        set->raToken[0] = 0;
+        set->raPass[0] = 0;
+        snprintf(set->raNote, sizeof(set->raNote), "Signed out.");
+        return 2;
+    }
+    if (r == 1 && (!set->raUser[0] || !set->raPass[0])) {
+        snprintf(set->raNote, sizeof(set->raNote), "Type a username and a password.");
+        return 0;
+    }
+    return r;
+}
+
+void pd_setup_ra_close(struct pd_setup* s, struct pd_settings* set) {
+    s->account = false;
+    set->raPass[0] = 0;
+}
+
+void pd_setup_ra_type(struct pd_setup* s, struct pd_settings* set, int ch) {
+    if (!s->account) return;
+    pd_ra_form_type(set->raUser, (int) sizeof(set->raUser), set->raPass, (int) sizeof(set->raPass), &s->ra, ch);
 }
