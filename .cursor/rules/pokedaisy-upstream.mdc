@@ -1,0 +1,12 @@
+---
+description: Upstream PokeDaisy is the reference for the companion
+alwaysApply: true
+---
+
+# PokeDaisy upstream
+
+The companion follows [lidor30/pokedaisy](https://github.com/lidor30/pokedaisy). Use that repo when the screen, the battle buttons, or the icon are in question.
+
+- Battle controls: `app/src/main/kotlin/com/pokedaisy/app/companion/ui/BattleControlsScreen.kt` (FIGHT, BAG, RUN, POKéMON, then moves / party / bag).
+- What a tap does in the game: `app/src/main/kotlin/com/pokedaisy/app/BattleInputController.kt`.
+- The icon SimpleOS shows, and the splash daisy: `3ds/ctr/icon.png` (from `app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png`).

@@ -14,8 +14,8 @@ Fan project, GPL-3. Non affiliato a Nintendo, Game Freak, The Pokémon Company o
 |---|---|
 | Piattaforma | Linux 64-bit (x86_64 per il PC, aarch64 sull’RG DS) |
 | Schermi | Auto: due display = fullscreen su ciascuno; altrimenti finestra 640×960 (gioco sopra, companion sotto) |
-| Giochi | Qualsiasi `.gba` si avvia. Il companion legge **FireRed / LeafGreen (rev 0 e 1)** e **Emerald** inglesi, come il port 3DS. |
-| Senza ROM | Demo con RAM di test (party / borsa / lotta) per vedere il companion |
+| Giochi | Qualsiasi `.gba`, anche dentro uno `.zip`. Il companion legge **FireRed / LeafGreen (rev 0 e 1)**, **Emerald** inglese e **Lazarus v2.0**. |
+| Elenco | Sullo schermo basso. La rotella **SETTINGS** (o Y) apre aspetto, HUD, tasti lotta, shader e tema. |
 
 Non è un recompile dell’app Android (Kotlin / Compose). È un host SDL2 intorno al core C già scritto per schermi doppi.
 
@@ -27,14 +27,6 @@ Dipendenze: CMake ≥ 3.16, un compilatore C, pthread. SDL2 e mGBA 0.10.5 vengon
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
-
-### Demo (nessuna ROM)
-
-```sh
-./build/pokedaisy --layout window --demo firered
-```
-
-Altre demo: `--demo emerald`, `--demo battle`.
 
 ### Con le tue ROM
 
@@ -74,8 +66,7 @@ L’RG DS può avviare Linux da microSD senza cancellare Android (documentazione
 
    - `pokedaisy` (il binario)
    - `PokeDaisy.sh` (da `ports/`)
-   - la cartella `share/pokedaisy/` accanto al binario (demo + dati)
-   - i tuoi `.gba` in `roms/`
+   - i tuoi `.gba` o `.zip` in `roms/`
 
 3. Avvio: `PokeDaisy.sh`. Con due display usa `--layout dual`; una sola framebuffer alta 960 px usa `--layout stacked`. `auto` sceglie da solo.
 
@@ -90,7 +81,9 @@ Saves: `~/.local/share/pokedaisy/saves/` (o `$POKEDAISY_HOME/saves`), formato `.
 | Start / Select | Invio / Backspace | Start / Select |
 | L / R | Q / E | Spalle GBA |
 | X | Tab | Scheda successiva del companion |
-| Y | Esc | Indietro nel companion |
+| Y | Esc | Indietro nel companion. Nell'elenco apre SETTINGS |
+| L3 | F1 | Menu rapido (avanti veloce, salva, zoom, schede) |
+| R3 | F2 | Cicla ORIGINAL / FIT / STRETCH |
 | R2 | Space | Fast-forward tenuto |
 | Touch schermo basso | Mouse | Tocchi del companion |
 | X+Y tenuti 1 s | | Esce dal gioco (con salvataggio) |
@@ -103,7 +96,8 @@ Saves: `~/.local/share/pokedaisy/saves/` (o `$POKEDAISY_HOME/saves`), formato `.
 ```
 pokedaisy [--layout auto|stacked|dual|window]
           [--home DIR] [--roms DIR]
-          [--demo firered|emerald|battle]
+          [--demo firered|emerald|battle]   # solo fixture, non in elenco
+          # i .zip in --roms vengono aperti come i .gba
           [--shot file.png]
           [--nintendo | --xbox]
           [rom.gba]

@@ -165,20 +165,32 @@ bool pd_decode_party_mon(const uint8_t* raw, struct pd_mon* m) {
     return true;
 }
 
-static void decode_battle_mon(const uint8_t* raw, struct pd_battle_mon* b) {
+static int off_or(int v, int fallback) {
+    return v ? v : fallback;
+}
+
+static void decode_battle_mon(const uint8_t* raw, struct pd_battle_mon* b, const struct pd_config* cfg) {
     memset(b, 0, sizeof(*b));
     b->species = u16(raw);
-    if (!b->species) return;
+    if (!b->species || b->species > 4096) return;
+    int moves = off_or(cfg->battleMoveOff, 0x0C);
+    int pp = off_or(cfg->battlePp, 0x24);
+    int type1 = off_or(cfg->battleType1, 0x21);
+    int type2 = off_or(cfg->battleType2, 0x22);
+    int hp = off_or(cfg->battleHp, 0x28);
+    int level = off_or(cfg->battleLevel, 0x2A);
+    int maxHp = off_or(cfg->battleMaxHp, 0x2C);
+    int status = off_or(cfg->battleStatus, 0x4C);
     for (int i = 0; i < PD_NUM_MOVES; i++) {
-        b->moves[i] = u16(raw + 0x0C + i * 2);
-        b->pp[i] = raw[0x24 + i];
+        b->moves[i] = u16(raw + moves + i * 2);
+        b->pp[i] = raw[pp + i];
     }
-    b->type1 = raw[0x21];
-    b->type2 = raw[0x22];
-    b->hp = u16(raw + 0x28);
-    b->level = raw[0x2A];
-    b->maxHp = u16(raw + 0x2C);
-    b->status = u32(raw + 0x4C);
+    b->type1 = raw[type1];
+    b->type2 = raw[type2];
+    b->hp = u16(raw + hp);
+    b->level = raw[level];
+    b->maxHp = u16(raw + maxHp);
+    b->status = u32(raw + status);
 }
 
 static void read_save_fields(struct pd_snapshot* s, const struct pd_config* cfg, pd_read_fn read, void* ctx,
@@ -228,12 +240,13 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
         read(ctx, cfg->battlersCount, &n, 1);
         if (n < 1 || n > 4) n = 4;
         read(ctx, cfg->battlerPositions, pos, 4);
-        uint8_t mons[4 * BATTLE_MON_SIZE];
+        int monSize = cfg->battleMonSize ? cfg->battleMonSize : BATTLE_MON_SIZE;
+        uint8_t mons[4 * 0x98];
         int foeBattler = -1;
-        if (read(ctx, cfg->battleMons, mons, sizeof(mons))) {
+        if (monSize > 0 && monSize <= 0x98 && read(ctx, cfg->battleMons, mons, (size_t) n * (size_t) monSize)) {
             for (int b = 0; b < n; b++) {
                 int p = pos[b] < 4 ? pos[b] : b;
-                decode_battle_mon(mons + b * BATTLE_MON_SIZE, &s->battlers[p]);
+                decode_battle_mon(mons + b * monSize, &s->battlers[p], cfg);
                 if (p == PD_POS_OPPONENT_LEFT) foeBattler = b;
             }
         }

@@ -34,10 +34,20 @@ enum pd_tab {
 
 // How the game fills the top screen.
 enum pd_screen_mode {
-    PD_SCREEN_PIXEL,   // 1x, pixel for pixel
-    PD_SCREEN_SHARP,   // 1.5x (fills the height), sharp bilinear
-    PD_SCREEN_STRETCH, // the whole 400x240, sharp bilinear
+    PD_SCREEN_PIXEL,   // integer scale, the game's own shape, square pixels
+    PD_SCREEN_SHARP,   // the game's shape, as large as the panel allows
+    PD_SCREEN_STRETCH, // fill the panel
     PD_SCREEN_MODES,
+};
+
+// Post-process on the game picture. Optional; off by default.
+enum pd_shader {
+    PD_SHADER_OFF,
+    PD_SHADER_LCD,
+    PD_SHADER_SCANLINES,
+    PD_SHADER_CRT,
+    PD_SHADER_GBA,
+    PD_SHADERS,
 };
 
 #define PD_FF_MIN 2
@@ -48,6 +58,11 @@ struct pd_settings {
     int screenMode; // enum pd_screen_mode
     int ffSpeed;    // PD_FF_MIN..PD_FF_MAX
     int guideNotice; // a bit per game kind whose GUIDE notice was accepted
+    int statusBar;     // game, place, money, clock and battery above the game
+    int hud;           // party levels and HP in the margin beside the game
+    int battleButtons; // the battle screen's FIGHT / BAG / POKéMON / RUN
+    int shader;        // enum pd_shader
+    int theme;         // library and settings colours
 };
 
 enum pd_action {
@@ -57,6 +72,15 @@ enum pd_action {
     PD_ACTION_LOAD_STATE,
     PD_ACTION_LEAVE_GAME,
     PD_ACTION_SETTINGS_CHANGED,
+    PD_ACTION_BATTLE_FIGHT,
+    PD_ACTION_BATTLE_PKMN,
+    PD_ACTION_BATTLE_RUN,
+    PD_ACTION_BATTLE_MOVE,   // actionArg = move slot 0..3
+    PD_ACTION_BATTLE_SWITCH, // actionArg = party slot
+    // actionArg = the game's bag pocket, actionArg2 = item index in it,
+    // actionArg3 = berry index after the BERRY POUCH (-1 = the item itself),
+    // actionArg4 = party slot to use it on (-1 = no target).
+    PD_ACTION_BATTLE_ITEM,
 };
 
 // What the host tells the companion about itself.
@@ -81,6 +105,8 @@ enum pd_overlay {
     PD_OVERLAY_NONE,
     PD_OVERLAY_PICK_SCREEN,
     PD_OVERLAY_PICK_FF,
+    PD_OVERLAY_PICK_SHADER,
+    PD_OVERLAY_PICK_THEME,
     PD_OVERLAY_CONFIRM_SAVE,
     PD_OVERLAY_CONFIRM_LOAD,
     PD_OVERLAY_CONFIRM_LEAVE,
@@ -97,6 +123,9 @@ struct pd_ui {
     // this battle (a bit each), the one tapped (-1 = follow the battle) and
     // the one shown (set by the draw); what the last read said was out / next.
     int battlePane;
+    // On the controls (battleButtons, pane 0): 0 the buttons, 1 moves,
+    // 2 who to send in, 3 the bag, 4 who an item is used on.
+    int battlePick;
     unsigned foeSeen;
     int foeSelected, foeShown;
     int lastFoeActive, lastFoeNext;
@@ -126,12 +155,18 @@ struct pd_ui {
     enum pd_overlay overlay;
     struct pd_settings* settings;
     enum pd_action action;
+    int actionArg, actionArg2, actionArg3, actionArg4;
+    // The last draw's game and snapshot, so a tap can read what it showed.
+    const struct pd_game* game;
+    const struct pd_snapshot* snap;
 
     bool touching, dragging, touchScroll;
     int touchX0, touchY0, touchLastY;
     int pressedId; // what the stylus went down on (-1 = nothing)
     struct pd_hit hits[PD_UI_MAX_HITS];
     int hitCount;
+    int settingsScroll; // SETTINGS list, in pixels
+    char settingsQuery[24];
 };
 
 void pd_ui_init(struct pd_ui* ui, struct pd_settings* settings);
@@ -143,7 +178,10 @@ void pd_ui_draw(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g,
 bool pd_ui_touch(struct pd_ui* ui, int x, int y, bool down);
 // Buttons the GBA doesn't have (the 3DS's X / Y): next / previous tab, BACK.
 void pd_ui_next_tab(struct pd_ui* ui, int dir);
+void pd_ui_open_tab(struct pd_ui* ui, enum pd_tab tab);
 bool pd_ui_back(struct pd_ui* ui);
+// SETTINGS search: ch > 0 appends, -1 deletes one character.
+void pd_ui_search_type(struct pd_ui* ui, int ch);
 // The last thing the player asked the host for (once), or PD_ACTION_NONE.
 enum pd_action pd_ui_take_action(struct pd_ui* ui);
 // Time passing (milliseconds since the last call): true when something on
@@ -152,5 +190,6 @@ enum pd_action pd_ui_take_action(struct pd_ui* ui);
 bool pd_ui_tick(struct pd_ui* ui, unsigned ms);
 
 const char* pd_screen_mode_name(int mode);
+const char* pd_shader_name(int shader);
 
 #endif

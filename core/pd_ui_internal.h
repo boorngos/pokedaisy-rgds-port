@@ -23,6 +23,7 @@ enum {
     HIT_BAG_LIST = 410,
     HIT_BAG_ROW = 500,     // + item index
     HIT_SETTING = 600,     // + enum setting_row
+    HIT_SETTINGS_LIST = 650,
     HIT_OPTION = 700,      // + pick-list option
     HIT_YES = 800,
     HIT_NO = 801,
@@ -44,17 +45,31 @@ enum {
     HIT_NOTICE_BACK = 2902,
     HIT_BATTLE_SUGGEST = 3000,
     HIT_BATTLE_INFO = 3001,
+    HIT_BATTLE_MENU = 3002,
     HIT_FOE_SLOT = 3010,   // + foe party index
+    HIT_CMD_FIGHT = 3200,
+    HIT_CMD_PKMN = 3201,
+    HIT_CMD_RUN = 3202,
+    HIT_CMD_BAG = 3203,
+    HIT_CMD_CANCEL = 3204,
+    HIT_MOVE = 3300,    // + move slot
+    HIT_SWITCH = 3400,  // + party slot
     HIT_OPEN_CARD = 3100,
     HIT_CARD = 3101,
 };
 
 enum setting_row {
     SETTING_SCREEN,
+    SETTING_STATUS,
+    SETTING_HUD,
+    SETTING_BATTLE_BTNS,
+    SETTING_SHADER,
+    SETTING_THEME,
     SETTING_FF,
     SETTING_SAVE_STATE,
     SETTING_LOAD_STATE,
     SETTING_LEAVE,
+    SETTING_ROWS,
 };
 
 void ui_add_hit(struct pd_ui* ui, int x, int y, int w, int h, int id);

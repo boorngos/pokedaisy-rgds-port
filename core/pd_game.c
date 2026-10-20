@@ -176,6 +176,46 @@ static const struct pd_config EMERALD = {
     .frontierBpOff = 0xEBA,
 };
 
+// Pokémon Lazarus v2.0 (sha1 7dcdc7e2…), pokeemerald-expansion. RAM from
+// NATIVE_LAZARUS: the party is still a retail 100-byte Pokémon, the battle
+// record is the expansion's 0x60-byte one, and the icons sit inside
+// gSpeciesInfo. Retail Emerald's addresses read an empty party.
+static const struct pd_config LAZARUS = {
+    .playerParty = 0x0201B960,
+    .playerPartyCount = 0x0201B95D,
+    .battleMons = 0x02000360,
+    .battlerPositions = 0x02000350,
+    .battlersCount = 0x02000344,
+    .battleTypeFlags = 0x020002C0,
+    .gMain = 0x030014B8,
+    .saveBlock1Ptr = 0x03003664,
+    .saveBlock2Ptr = 0x03003668,
+    .mapHeader = 0x0200B06C,
+    .encryptionKeyOff = 0xB0,
+    .moneyOff = 0x490,
+    .enemyParty = 0x0201BBB8,
+    .battlerPartyIndexes = 0x02000348,
+    .battleStructPtr = 0x0200082C,
+    .monToSwitchIntoOff = 0x3C,
+    .monIconTable = 0x08C7A3B0,
+    .monIconPaletteIndices = 0x08C7A3BE,
+    .monIconPaletteTable = 0x08CCC360,
+    .monIconStride = 0xD4,
+    .monPalIdxStride = 0xD4,
+    .monPalIdxMask = 0x07,
+    .bagPockets = 0x0200B0D8,
+    .bagOrder = { PD_POCKET_ITEMS, PD_POCKET_BALLS, PD_POCKET_TMHM, PD_POCKET_BERRIES, PD_POCKET_KEY },
+    .battleMonSize = 0x60,
+    .battleMoveOff = 0x0C,
+    .battleType1 = 0x22,
+    .battleType2 = 0x23,
+    .battlePp = 0x25,
+    .battleHp = 0x2A,
+    .battleLevel = 0x2C,
+    .battleMaxHp = 0x2E,
+    .battleStatus = 0x50,
+};
+
 const uint8_t* pd_rom_at(const struct pd_game* g, uint32_t addr, size_t len) {
     if (!g->rom || addr < 0x08000000) return NULL;
     size_t off = addr - 0x08000000;
@@ -222,4 +262,14 @@ void pd_game_detect(struct pd_game* g, const uint8_t* header, size_t romSize) {
         g->unsupported = "This revision isn't supported yet";
     }
     (void) romSize;
+}
+
+void pd_game_apply_sha1(struct pd_game* g, const char* hex) {
+    if (!hex) return;
+    if (!strcmp(hex, "7dcdc7e280bc4631487e13dd37e6e0cea04adea6")) {
+        g->kind = PD_GAME_EMERALD;
+        g->title = "Pokémon Lazarus";
+        g->cfg = &LAZARUS;
+        g->unsupported = NULL;
+    }
 }

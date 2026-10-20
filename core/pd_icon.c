@@ -28,11 +28,17 @@ static uint32_t bgr555(uint16_t c) {
 
 static bool decode(const struct pd_game* g, int species, uint32_t* out) {
     const struct pd_config* cfg = g->cfg;
-    if (!cfg || !cfg->monIconTable || species <= 0 || species > PD_SPECIES_EGG) return false;
+    int cap = cfg && cfg->monIconStride ? 4096 : PD_SPECIES_EGG;
+    if (!cfg || !cfg->monIconTable || species <= 0 || species >= cap) return false;
+    uint32_t stride = cfg->monIconStride ? cfg->monIconStride : 4;
+    uint32_t palStride = cfg->monPalIdxStride ? cfg->monPalIdxStride : 1;
     uint8_t w[4], idx;
-    if (!pd_rom_read(g, cfg->monIconTable + (uint32_t) species * 4, w, 4)) return false;
+    if (!pd_rom_read(g, cfg->monIconTable + (uint32_t) species * stride, w, 4)) return false;
     const uint8_t* tiles = pd_rom_at(g, u32le(w), 16 * 32);
-    if (!tiles || !pd_rom_read(g, cfg->monIconPaletteIndices + (uint32_t) species, &idx, 1) || idx > 15) return false;
+    if (!tiles || tiles[0] == 0x10) return false;
+    if (!pd_rom_read(g, cfg->monIconPaletteIndices + (uint32_t) species * palStride, &idx, 1)) return false;
+    if (cfg->monPalIdxMask) idx = (uint8_t) (idx & cfg->monPalIdxMask);
+    if (idx > 15) return false;
     if (!pd_rom_read(g, cfg->monIconPaletteTable + (uint32_t) idx * 8, w, 4)) return false;
     const uint8_t* pal = pd_rom_at(g, u32le(w), 32);
     if (!pal) return false;

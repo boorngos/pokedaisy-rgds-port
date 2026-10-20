@@ -39,6 +39,13 @@ struct pd_config {
     // species), gMonIconPaletteIndices (u8) and gMonIconPaletteTable
     // ({data, tag}, 8 bytes). 0 = none.
     uint32_t monIconTable, monIconPaletteIndices, monIconPaletteTable;
+    // 0 = a pointer every 4 bytes / a palette index every byte. Expansion
+    // hacks keep both inside gSpeciesInfo, one record apart.
+    uint32_t monIconStride, monPalIdxStride;
+    uint8_t monPalIdxMask; // 0 = use the byte; else keep these bits
+    // struct BattlePokemon. 0 = retail FireRed/Emerald (0x58 bytes).
+    int battleMonSize;
+    int battleMoveOff, battleType1, battleType2, battlePp, battleHp, battleLevel, battleMaxHp, battleStatus;
     // gBagPockets: five {slots pointer, capacity} pairs, 8 bytes apart;
     // bagOrder[i] is the pocket (PD_POCKET_*) the game keeps at index i.
     uint32_t bagPockets;
@@ -120,5 +127,9 @@ const uint8_t* pd_rom_at(const struct pd_game* g, uint32_t addr, size_t len);
 
 // Reads the ROM header (the first 0xC0 bytes of the ROM) and its size.
 void pd_game_detect(struct pd_game* g, const uint8_t* header, size_t romSize);
+// A BPEE image larger than retail Emerald. hex is the lowercase SHA-1 of the
+// whole file. A known hack replaces the retail RAM map; anything else is
+// left on Emerald's addresses.
+void pd_game_apply_sha1(struct pd_game* g, const char* hex);
 
 #endif

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pd_style.h"
 #include "pd_ui_internal.h"
 
 #define CHIP_H 22
@@ -61,6 +62,7 @@ void pd_ui_update(struct pd_ui* ui, const struct pd_snapshot* s) {
         ui->summarySlot = -1;
         ui->overlay = PD_OVERLAY_NONE;
         ui->battlePane = 0;
+        ui->battlePick = 0;
         ui->foeSeen = 0;
         ui->foeSelected = -1;
         ui->lastFoeActive = ui->lastFoeNext = -1;
@@ -124,6 +126,8 @@ static void tab_bar(struct pd_ui* ui, struct pd_canvas* c, const struct pd_host_
 void pd_ui_draw(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g,
                 const struct pd_snapshot* s, const struct pd_host_info* host) {
     ui->hitCount = 0;
+    ui->game = g;
+    ui->snap = s;
     pd_backdrop(c);
     tab_bar(ui, c, host);
     if (ui->tab == PD_TAB_SETTINGS) {
@@ -157,10 +161,12 @@ void pd_ui_draw(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g,
 // The list a drag scrolls right now.
 static int* scroll_target(struct pd_ui* ui) {
     if (ui->overlay == PD_OVERLAY_PLACES) return &ui->placesScroll;
+    if (ui->tab == PD_TAB_BATTLE && ui->battlePick == 3) return &ui->bagScroll;
     switch (ui->tab) {
     case PD_TAB_BAG: return &ui->bagScroll;
     case PD_TAB_DEX: return &ui->dexScroll;
     case PD_TAB_GUIDE: return &ui->guideScroll;
+    case PD_TAB_SETTINGS: return &ui->settingsScroll;
     default: return NULL;
     }
 }
@@ -185,10 +191,15 @@ static void act(struct pd_ui* ui, int id) {
         return;
     }
     if (ui->overlay != PD_OVERLAY_NONE) {
-        if (id >= HIT_OPTION && id < HIT_OPTION + 8) {
+        if (id >= HIT_OPTION && id < HIT_OPTION + 16) {
             int i = id - HIT_OPTION;
-            if (ui->overlay == PD_OVERLAY_PICK_SCREEN) ui->settings->screenMode = i;
-            if (ui->overlay == PD_OVERLAY_PICK_FF) ui->settings->ffSpeed = PD_FF_MIN + i;
+            if (ui->overlay == PD_OVERLAY_PICK_SCREEN && i < PD_SCREEN_MODES) ui->settings->screenMode = i;
+            if (ui->overlay == PD_OVERLAY_PICK_FF && i <= PD_FF_MAX - PD_FF_MIN) ui->settings->ffSpeed = PD_FF_MIN + i;
+            if (ui->overlay == PD_OVERLAY_PICK_SHADER && i < PD_SHADERS) ui->settings->shader = i;
+            if (ui->overlay == PD_OVERLAY_PICK_THEME && i < PD_THEMES) {
+                ui->settings->theme = i;
+                pd_style_set_theme(i);
+            }
             close_overlay(ui, PD_ACTION_SETTINGS_CHANGED);
         } else if (id == HIT_YES) {
             enum pd_action a = ui->overlay == PD_OVERLAY_CONFIRM_SAVE ? PD_ACTION_SAVE_STATE
@@ -203,6 +214,7 @@ static void act(struct pd_ui* ui, int id) {
     if (id >= HIT_TAB && id < HIT_TAB + PD_TAB_COUNT) {
         ui->tab = (enum pd_tab) (id - HIT_TAB);
         ui->summarySlot = -1;
+        if (ui->tab != PD_TAB_BATTLE) ui->battlePick = 0;
     } else if (id == HIT_FF) {
         ui->action = PD_ACTION_TOGGLE_FF;
     } else if (id >= HIT_SLOT && id < HIT_SLOT + PD_PARTY_SIZE) {
@@ -216,15 +228,25 @@ static void act(struct pd_ui* ui, int id) {
         ui->bagScroll = 0;
     } else if (id >= HIT_BAG_ROW && id < HIT_BAG_ROW + PD_POCKET_SLOTS) {
         ui->bagSelected = id - HIT_BAG_ROW;
-    } else if (id >= HIT_SETTING && id <= HIT_SETTING + SETTING_LEAVE) {
-        static const enum pd_overlay OPENS[] = {
-            [SETTING_SCREEN] = PD_OVERLAY_PICK_SCREEN,
-            [SETTING_FF] = PD_OVERLAY_PICK_FF,
-            [SETTING_SAVE_STATE] = PD_OVERLAY_CONFIRM_SAVE,
-            [SETTING_LOAD_STATE] = PD_OVERLAY_CONFIRM_LOAD,
-            [SETTING_LEAVE] = PD_OVERLAY_CONFIRM_LEAVE,
-        };
-        ui->overlay = OPENS[id - HIT_SETTING];
+    } else if (id >= HIT_SETTING && id < HIT_SETTING + SETTING_ROWS) {
+        int row = id - HIT_SETTING;
+        if (row == SETTING_SCREEN) ui->overlay = PD_OVERLAY_PICK_SCREEN;
+        else if (row == SETTING_SHADER) ui->overlay = PD_OVERLAY_PICK_SHADER;
+        else if (row == SETTING_THEME) ui->overlay = PD_OVERLAY_PICK_THEME;
+        else if (row == SETTING_FF) ui->overlay = PD_OVERLAY_PICK_FF;
+        else if (row == SETTING_SAVE_STATE) ui->overlay = PD_OVERLAY_CONFIRM_SAVE;
+        else if (row == SETTING_LOAD_STATE) ui->overlay = PD_OVERLAY_CONFIRM_LOAD;
+        else if (row == SETTING_LEAVE) ui->overlay = PD_OVERLAY_CONFIRM_LEAVE;
+        else if (row == SETTING_STATUS) {
+            ui->settings->statusBar = !ui->settings->statusBar;
+            ui->action = PD_ACTION_SETTINGS_CHANGED;
+        } else if (row == SETTING_HUD) {
+            ui->settings->hud = !ui->settings->hud;
+            ui->action = PD_ACTION_SETTINGS_CHANGED;
+        } else if (row == SETTING_BATTLE_BTNS) {
+            ui->settings->battleButtons = !ui->settings->battleButtons;
+            ui->action = PD_ACTION_SETTINGS_CHANGED;
+        }
     }
 }
 
@@ -275,6 +297,26 @@ bool pd_ui_touch(struct pd_ui* ui, int x, int y, bool down) {
     return true;
 }
 
+void pd_ui_open_tab(struct pd_ui* ui, enum pd_tab tab) {
+    if (tab < 0 || tab >= PD_TAB_COUNT) return;
+    ui->overlay = PD_OVERLAY_NONE;
+    ui->summarySlot = -1;
+    ui->tab = tab;
+    if (tab != PD_TAB_BATTLE) ui->battlePick = 0;
+}
+
+void pd_ui_search_type(struct pd_ui* ui, int ch) {
+    if (ui->tab != PD_TAB_SETTINGS || ui->overlay != PD_OVERLAY_NONE) return;
+    size_t n = strlen(ui->settingsQuery);
+    if (ch == -1) {
+        if (n) ui->settingsQuery[n - 1] = 0;
+    } else if (ch >= 32 && ch < 127 && n + 1 < sizeof(ui->settingsQuery)) {
+        ui->settingsQuery[n] = (char) ch;
+        ui->settingsQuery[n + 1] = 0;
+    }
+    ui->settingsScroll = 0;
+}
+
 void pd_ui_next_tab(struct pd_ui* ui, int dir) {
     if (ui->overlay != PD_OVERLAY_NONE) return;
     // The bar's order, then the gear.
@@ -288,6 +330,7 @@ void pd_ui_next_tab(struct pd_ui* ui, int dir) {
     if (ui->tab == PD_TAB_SETTINGS || ui->tab == PD_TAB_CARD) at = BAR_TABS;
     ui->tab = order[(at + BAR_TABS + 1 + dir) % (BAR_TABS + 1)];
     ui->summarySlot = -1;
+    if (ui->tab != PD_TAB_BATTLE) ui->battlePick = 0;
 }
 
 bool pd_ui_back(struct pd_ui* ui) {
@@ -315,6 +358,10 @@ bool pd_ui_back(struct pd_ui* ui) {
     }
     if (ui->tab == PD_TAB_CARD) {
         ui->tab = PD_TAB_SETTINGS;
+        return true;
+    }
+    if (ui->tab == PD_TAB_BATTLE && ui->battlePick) {
+        ui->battlePick = 0;
         return true;
     }
     if (ui->tab == PD_TAB_BATTLE && ui->battlePane) {

@@ -90,11 +90,15 @@ file(GLOB CORE_SOURCES "${CMAKE_SOURCE_DIR}/core/*.c")
 add_executable(pokedaisy
     linux/host.c
     linux/pd_png.c
+    linux/pd_zip.c
+    linux/pd_sha1.c
+    third_party/tinf/tinflate.c
     ${CORE_SOURCES})
 
 target_include_directories(pokedaisy PRIVATE
     "${CMAKE_SOURCE_DIR}/core"
     "${CMAKE_SOURCE_DIR}/linux"
+    "${CMAKE_SOURCE_DIR}/third_party/tinf"
     "${MGBA_SRC}/include"
     "${MGBA_SRC}/src"
     "${CMAKE_CURRENT_BINARY_DIR}/mgba/include"
@@ -116,7 +120,6 @@ elseif(TARGET SDL2main)
 endif()
 
 install(TARGETS pokedaisy RUNTIME DESTINATION bin)
-install(DIRECTORY share/pokedaisy/ DESTINATION share/pokedaisy)
 
 add_executable(pokedaisy-preview
     linux/preview.c
