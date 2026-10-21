@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pd_lazarus.h"
+
 // --- finding blobs (RomArt.find) ---
 
 // Both hosts (the 3DS's ARM11, the desktop) are little-endian: one unaligned
@@ -129,7 +131,9 @@ void pd_romart_scan(const struct pd_game* g) {
         found[i] = NULL;
     }
     foundRom = rom;
-    int family = g->kind == PD_GAME_FIRERED ? PD_BLOB_FIRERED : g->kind == PD_GAME_EMERALD ? PD_BLOB_EMERALD : 0;
+    int family = pd_is_lazarus(g) ? PD_BLOB_LAZARUS
+                                : g->kind == PD_GAME_FIRERED ? PD_BLOB_FIRERED
+                                                             : g->kind == PD_GAME_EMERALD ? PD_BLOB_EMERALD : 0;
     if (!rom || !family) return;
     int wanted[PD_BLOB_COUNT], n = 0;
     for (int i = 0; i < PD_BLOB_COUNT; i++) {

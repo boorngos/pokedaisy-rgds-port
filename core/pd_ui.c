@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "pd_battle.h"
+#include "pd_lazarus.h"
 #include "pd_style.h"
 #include "pd_ui_internal.h"
 
@@ -129,6 +130,7 @@ static void tab_bar(struct pd_ui* ui, struct pd_canvas* c, const struct pd_host_
 
 void pd_ui_draw(struct pd_ui* ui, struct pd_canvas* c, const struct pd_game* g,
                 const struct pd_snapshot* s, const struct pd_host_info* host) {
+    pd_bind_game(g);
     ui->hitCount = 0;
     ui->game = g;
     ui->snap = s;

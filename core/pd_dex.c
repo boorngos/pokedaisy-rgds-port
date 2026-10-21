@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "pd_lazarus.h"
 #include "pd_map.h"
 #include "pd_snapshot.h"
 #include "pd_tables.h"
@@ -23,6 +24,7 @@ static unsigned tablesRom;
 static uint16_t toNational[SPECIES_COUNT];
 static uint16_t toSpecies[PD_NATIONAL_COUNT + 1];
 static bool available;
+static bool laz;
 static uint16_t extToNational[EXT_SPECIES];
 static uint16_t extToSpecies[PD_NATIONAL_COUNT + 1];
 static bool extOn;
@@ -90,9 +92,15 @@ static void build(const struct pd_game* g) {
     if (tablesRom == pd_rom_id(g)) return;
     tablesRom = pd_rom_id(g);
     available = false;
+    laz = false;
     memset(toNational, 0, sizeof(toNational));
     memset(toSpecies, 0, sizeof(toSpecies));
     build_ext(g);
+    if (pd_is_lazarus(g) && pd_laz_species_named(g, 25)) {
+        laz = true;
+        available = true;
+        return;
+    }
     const struct pd_config* cfg = g->cfg;
     if (!cfg || !cfg->dexEntries || !g->rom) return;
     const uint8_t* nat = pd_rom_at(g, cfg->speciesToNational, (SPECIES_COUNT - 1) * 2);
@@ -121,6 +129,7 @@ bool pd_dex_available(const struct pd_game* g) {
 
 int pd_dex_species(const struct pd_game* g, int national) {
     build(g);
+    if (laz) return national >= 1 && national <= PD_NATIONAL_COUNT && pd_laz_species_named(g, national) ? national : 0;
     if (extOn && national >= 1 && national <= PD_NATIONAL_COUNT && extToSpecies[national]) {
         return extToSpecies[national];
     }
@@ -129,6 +138,7 @@ int pd_dex_species(const struct pd_game* g, int national) {
 
 int pd_dex_national(const struct pd_game* g, int species) {
     build(g);
+    if (laz) return species >= 1 && species <= PD_NATIONAL_COUNT && pd_laz_species_named(g, species) ? species : 0;
     if (extOn && species >= 1 && species < EXT_SPECIES && extToNational[species]) return extToNational[species];
     return available && species >= 1 && species < SPECIES_COUNT ? toNational[species] : 0;
 }
@@ -145,6 +155,25 @@ bool pd_dex_entry(const struct pd_game* g, int national, struct pd_dex_entry* ou
     memset(out, 0, sizeof(*out));
     const struct pd_config* cfg = g->cfg;
     if (!pd_dex_available(g) || !cfg) return false;
+    if (laz) {
+        out->national = national;
+        out->species = pd_dex_species(g, national);
+        const uint8_t* e = pd_laz_species(g, out->species);
+        if (!e) return out->species != 0;
+        pd_gen3_text(e + 0x1F, 13, out->category, sizeof(out->category));
+        out->heightDm = u16(e + 0x3E);
+        out->weightHg = u16(e + 0x40);
+        const uint8_t* d = pd_rom_at(g, u32(e + 0x4C), 200);
+        if (d) pd_gen3_text(d, 200, out->description, sizeof(out->description));
+        static const int ORDER[6] = { 0, 1, 2, 4, 5, 3 };
+        for (int i = 0; i < 6; i++) out->stats[i] = e[ORDER[i]];
+        out->type1 = e[6];
+        out->type2 = e[7];
+        int a1 = u16(e + 0x18), a2 = u16(e + 0x1A);
+        pd_laz_ability(g, a1, out->ability1, sizeof(out->ability1));
+        if (a2 != a1) pd_laz_ability(g, a2, out->ability2, sizeof(out->ability2));
+        return true;
+    }
     out->national = national;
     out->species = pd_dex_species(g, national);
     // Past the retail tables the entry bytes belong to something else.
@@ -175,21 +204,41 @@ bool pd_dex_entry(const struct pd_game* g, int national, struct pd_dex_entry* ou
 
 bool pd_dex_sprite(const struct pd_game* g, int species, uint32_t* out) {
     const struct pd_config* cfg = g->cfg;
-    if (!pd_dex_available(g) || species < 1 || species >= SPECIES_COUNT) return false;
-    const uint8_t* pic = pd_rom_at(g, cfg->frontPics + (uint32_t) species * 8, 8);
-    const uint8_t* pal = pd_rom_at(g, cfg->palettes + (uint32_t) species * 8, 8);
-    if (!pic || !pal) return false;
-    const uint8_t* picLz = pd_rom_at(g, u32(pic), 4);
-    const uint8_t* palLz = pd_rom_at(g, u32(pal), 4);
-    if (!picLz || !palLz) return false;
+    if (!pd_dex_available(g)) return false;
+    const uint8_t* picLz = NULL;
+    const uint8_t* palSrc = NULL;
+    bool palRaw = false;
+    if (laz) {
+        const uint8_t* e = pd_laz_species(g, species);
+        if (!e) return false;
+        picLz = pd_rom_at(g, u32(e + 0x58), 4);
+        palSrc = pd_rom_at(g, u32(e + 0x68), 4);
+        if (!picLz || !palSrc) return false;
+        palRaw = palSrc[0] != 0x10;
+    } else if (species < 1 || species >= SPECIES_COUNT) {
+        return false;
+    } else {
+        const uint8_t* pic = pd_rom_at(g, cfg->frontPics + (uint32_t) species * 8, 8);
+        const uint8_t* pal = pd_rom_at(g, cfg->palettes + (uint32_t) species * 8, 8);
+        if (!pic || !pal) return false;
+        picLz = pd_rom_at(g, u32(pic), 4);
+        palSrc = pd_rom_at(g, u32(pal), 4);
+        if (!picLz || !palSrc) return false;
+    }
+    if (!picLz || !palSrc) return false;
     // The decoded sizes come from the LZ77 headers: one 64x64 frame is 2048
     // bytes (Emerald's pics hold two frames; the first is used).
     size_t picSize = picLz[1] | (size_t) picLz[2] << 8 | (size_t) picLz[3] << 16;
-    size_t palSize = palLz[1] | (size_t) palLz[2] << 8 | (size_t) palLz[3] << 16;
-    if (picSize < 2048 || picSize > 8192 || palSize < 32 || palSize > 64) return false;
+    size_t palSize = palRaw ? 32 : palSrc[1] | (size_t) palSrc[2] << 8 | (size_t) palSrc[3] << 16;
+    if (picLz[0] != 0x10 || picSize < 2048 || picSize > 8192 || palSize < 32 || palSize > 64) return false;
     static uint8_t tiles[8192], colours[64];
-    size_t picAvail = g->romSize - (size_t) (picLz - g->rom), palAvail = g->romSize - (size_t) (palLz - g->rom);
-    if (pd_lz77(picLz, picAvail, tiles, picSize) != picSize || pd_lz77(palLz, palAvail, colours, palSize) != palSize) {
+    size_t picAvail = g->romSize - (size_t) (picLz - g->rom);
+    size_t palAvail = g->romSize - (size_t) (palSrc - g->rom);
+    if (pd_lz77(picLz, picAvail, tiles, picSize) != picSize) return false;
+    if (palRaw) {
+        if (palAvail < 32) return false;
+        memcpy(colours, palSrc, 32);
+    } else if (pd_lz77(palSrc, palAvail, colours, palSize) != palSize) {
         return false;
     }
     uint32_t rgb[16];
@@ -224,6 +273,7 @@ void pd_dex_weight(int hg, char* buf, int len) {
 
 const char* pd_dex_name(const struct pd_game* g, int species, char* buf, size_t len) {
     build(g);
+    if (laz) return pd_species_name(species, buf, len);
     if (species > SPECIES_COUNT - 1 && extNames) {
         const uint8_t* n = pd_rom_at(g, extNames + (uint32_t) species * 11, 11);
         if (n) {

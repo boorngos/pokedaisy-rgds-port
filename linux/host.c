@@ -593,13 +593,18 @@ static void present_screens(struct video* v, int screenMode, const uint32_t* gam
         dst.x = (topW - dst.w) / 2;
         dst.y = areaY + (areaH - dst.h) / 2;
     }
+    if (cover && v->texGame) SDL_SetTextureColorMod(v->texGame, 111, 111, 111);
+    SDL_RenderCopy(v->renTop, v->texGame, NULL, &dst);
+    if (cover && v->texGame) SDL_SetTextureColorMod(v->texGame, 255, 255, 255);
     if (cover && v->texMenu) {
         static uint32_t argb[PD_UI_WIDTH * PD_UI_HEIGHT];
-        for (int i = 0; i < PD_UI_WIDTH * PD_UI_HEIGHT; i++) argb[i] = 0xFF000000u | cover[i];
+        for (int i = 0; i < PD_UI_WIDTH * PD_UI_HEIGHT; i++)
+            argb[i] = cover[i] ? (0xFF000000u | cover[i]) : 0;
         SDL_UpdateTexture(v->texMenu, NULL, argb, PD_UI_WIDTH * 4);
+        SDL_SetTextureBlendMode(v->texMenu, SDL_BLENDMODE_BLEND);
         SDL_Rect coverDst = { 0, areaY, topW, areaH };
         SDL_RenderCopy(v->renTop, v->texMenu, NULL, &coverDst);
-    } else SDL_RenderCopy(v->renTop, v->texGame, NULL, &dst);
+    }
     if (!cover && hud && hud->count > 0 && v->texHud && dst.x >= 76) {
         static uint32_t hudPx[72 * 120];
         struct pd_canvas hc;
@@ -1485,20 +1490,11 @@ static bool quick_do(struct pd_ui* ui, int row, bool* ffToggled, struct mCore* c
     return true;
 }
 
-// The wheel sits on the top screen, over a dimmed copy of the game, the way
-// the Android ring does. 320x240 stretched across that screen.
-static void paint_wheel(uint32_t* dst, const uint32_t* game, int bgr, int shader, const char* const* items, int n,
-                        int sel, const char* note, unsigned blocked) {
-    for (int y = 0; y < PD_UI_HEIGHT; y++) {
-        int sy = y * GBA_H / PD_UI_HEIGHT;
-        for (int x = 0; x < PD_UI_WIDTH; x++) {
-            int sx = x * GBA_W / PD_UI_WIDTH;
-            uint32_t p = game[sy * GBA_W + sx];
-            if (bgr) p = (p & 0xFF00FF00u) | ((p & 0x00FF0000u) >> 16) | ((p & 0x000000FFu) << 16);
-            p = shade_pixel(p, shader, sx, sy);
-            dst[y * PD_UI_WIDTH + x] = p & 0xFFFFFFu;
-        }
-    }
+// Tiles only. The game stays in its current frame underneath; empty pixels
+// stay 0 so present_screens can draw this layer with a transparent ground.
+static void paint_wheel(uint32_t* dst, const char* const* items, int n, int sel, const char* note,
+                        unsigned blocked) {
+    memset(dst, 0, (size_t) PD_UI_WIDTH * PD_UI_HEIGHT * sizeof(uint32_t));
     struct pd_canvas top;
     pd_canvas_init(&top, PD_UI_WIDTH, PD_UI_HEIGHT, dst);
     pd_quick_draw(&top, items, n, sel, note, blocked);
@@ -1616,7 +1612,7 @@ static bool run_game(const char* file) {
             g.wildOpen = 0;
             redraw = true;
         }
-        if (r3 && !prevR3 && !g.quick) {
+        if (r3 && !prevR3 && !l3 && !g.quick) {
             g.settings.screenMode = (g.settings.screenMode + 1) % PD_SCREEN_MODES;
             pd_settings_save(&g.settings, g.paths.settings);
             redraw = true;
@@ -1769,8 +1765,8 @@ static bool run_game(const char* file) {
         const struct hud_view* hudPtr = g.settings.hud ? &hud : NULL;
         const uint32_t* cover = NULL;
         if (g.quick && !g.wildOpen) {
-            paint_wheel(splashPx, gamePx, g.video.gameBgr, g.settings.shader, QUICK_ITEMS, QUICK_N, g.quickSel,
-                        quick_note(g.quickSel, &shown, host.hasState), quick_blocked(&shown, host.hasState));
+            paint_wheel(splashPx, QUICK_ITEMS, QUICK_N, g.quickSel, quick_note(g.quickSel, &shown, host.hasState),
+                        quick_blocked(&shown, host.hasState));
             cover = splashPx;
         }
         if (redraw) {

@@ -33,12 +33,15 @@ enum pd_blob {
     PD_EM_PIC_BRENDAN, PD_EM_PIC_BRENDAN_PAL, PD_EM_PIC_MAY, PD_EM_PIC_MAY_PAL,
     PD_EM_FONT_NORMAL, PD_EM_FONT_NORMAL_WIDTHS,
     PD_CARD_STAR_PAL,
+    // Pokémon Lazarus's own region map (Emerald's 8bpp screen, its art).
+    PD_LZ_REGION_GFX, PD_LZ_REGION_PAL, PD_LZ_REGION_MAP,
     PD_BLOB_COUNT,
 };
 
 // Which games' ROMs a blob is looked for in.
 #define PD_BLOB_FIRERED 1
 #define PD_BLOB_EMERALD 2
+#define PD_BLOB_LAZARUS 4
 
 // RomBlob: size and CRC32 of the decoded bytes, and a 16-byte window at
 // headOff into the raw bytes whose hash is head (pre = its 16-bit prefilter).

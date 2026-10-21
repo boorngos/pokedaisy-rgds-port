@@ -4,6 +4,7 @@
 #define PD_TABLES_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 struct pd_move_info {
     const char* name;
@@ -49,6 +50,8 @@ extern const int pd_species_type_table_count;
 const char* pd_species_name(int species, char* buf, size_t len);
 const char* pd_move_name(int move, char* buf, size_t len);
 const char* pd_type_name(int type);
+// 0xRRGGBB for the move's type plate. 0x888888 when the type is unknown.
+uint32_t pd_type_color(int type);
 int pd_move_type(int move);
 int pd_move_power(int move);
 

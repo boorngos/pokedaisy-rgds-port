@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pd_lazarus.h"
+
 // --- drawing (RomArt's screen / emeraldRegionMap / sprite) ---
 
 static uint32_t bgr555(uint16_t c) {
@@ -105,6 +107,15 @@ const struct pd_map_art* pd_map_art(const struct pd_game* g) {
                 cached->hasHead[s] = true;
             }
         }
+    } else if (pd_is_lazarus(g)) {
+        if (blob[PD_LZ_REGION_GFX] && blob[PD_LZ_REGION_PAL] && blob[PD_LZ_REGION_MAP]) {
+            int colours = (int) pd_blob_sigs[PD_LZ_REGION_PAL].size / 2;
+            palette(blob[PD_LZ_REGION_PAL], colours, pal);
+            screen_8bpp(blob[PD_LZ_REGION_GFX], pd_blob_sigs[PD_LZ_REGION_GFX].size, pal, colours,
+                        blob[PD_LZ_REGION_MAP], cached->page[0]);
+            cached->pages = 1;
+            cached->ok = true;
+        }
     } else {
         if (blob[PD_EM_REGION_GFX] && blob[PD_EM_REGION_PAL] && blob[PD_EM_REGION_MAP]) {
             int colours = (int) pd_blob_sigs[PD_EM_REGION_PAL].size / 2;
@@ -129,7 +140,25 @@ const struct pd_map_art* pd_map_art(const struct pd_game* g) {
 
 // --- sections, the cursor grid, the player (RegionMapModel) ---
 
+static struct pd_mapsec_rect lazRects[256];
+static uint8_t lazGrid[PD_LAZ_MAP_W * PD_LAZ_MAP_H];
+static unsigned lazReady;
+static const struct pd_region_layout lazLayout = {
+    PD_LAZ_MAP_OX, PD_LAZ_MAP_OY, PD_LAZ_MAP_W, PD_LAZ_MAP_H, PD_LAZ_MAP_NONE, { lazGrid, NULL },
+};
+
+static void laz_ready(const struct pd_game* g) {
+    if (lazReady == pd_rom_id(g)) return;
+    pd_laz_map_prepare(g, lazRects, lazGrid);
+    lazReady = pd_rom_id(g);
+}
+
 static const struct pd_region_layout* layouts(const struct pd_game* g, int* n) {
+    if (pd_is_lazarus(g)) {
+        laz_ready(g);
+        *n = 1;
+        return &lazLayout;
+    }
     if (g->kind == PD_GAME_EMERALD) {
         *n = pd_layouts_emerald_count;
         return pd_layouts_emerald;
@@ -139,6 +168,10 @@ static const struct pd_region_layout* layouts(const struct pd_game* g, int* n) {
 }
 
 static const struct pd_mapsec_rect* rect_of(const struct pd_game* g, int mapsec) {
+    if (pd_is_lazarus(g)) {
+        laz_ready(g);
+        return mapsec >= 0 && mapsec < 256 ? &lazRects[mapsec] : NULL;
+    }
     if (g->kind == PD_GAME_EMERALD) {
         return mapsec >= 0 && mapsec < pd_mapsec_rects_emerald_count ? &pd_mapsec_rects_emerald[mapsec] : NULL;
     }
@@ -224,6 +257,7 @@ bool pd_map_player_tile(const struct pd_game* g, const struct pd_snapshot* s, in
 }
 
 const char* pd_map_page_name(const struct pd_game* g, int page) {
+    if (pd_is_lazarus(g)) return "ILIOS";
     if (g->kind == PD_GAME_EMERALD) return "HOENN";
     static const char* const NAMES[PD_MAP_PAGES] = { "KANTO", "SEVII 1-3", "SEVII 4-5", "SEVII 6-7" };
     return page >= 0 && page < PD_MAP_PAGES ? NAMES[page] : "";

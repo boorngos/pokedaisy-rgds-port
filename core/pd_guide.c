@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "pd_dex.h"
+#include "pd_lazarus.h"
 
 #define TRAINER_STRIDE 0x28
 #define WILD_HEADER 20
@@ -212,17 +213,28 @@ static int cmp_wild(const void* a, const void* b) {
 
 bool pd_wild_here(const struct pd_game* g, const struct pd_snapshot* s, struct pd_wild_set* out) {
     memset(out, 0, sizeof(*out));
-    if (!s->posOk || !pd_guide_rom_ok(g)) return false;
+    if (!s->posOk || !g->cfg || !g->cfg->wildHeaders) return false;
+    // Lazarus headers are 24 bytes: land, water, rock smash, a hidden table,
+    // then fishing. Night (and Altering Cave) is the next header of this map.
+    int stride = pd_is_lazarus(g) ? 24 : WILD_HEADER;
+    int fishAt = pd_is_lazarus(g) ? 20 : 16;
+    if (!pd_is_lazarus(g) && !pd_guide_rom_ok(g)) return false;
     for (int h = 0; h < MAX_HEADERS; h++) {
-        const uint8_t* hd = pd_rom_at(g, g->cfg->wildHeaders + (uint32_t) h * WILD_HEADER, WILD_HEADER);
+        const uint8_t* hd = pd_rom_at(g, g->cfg->wildHeaders + (uint32_t) h * stride, (size_t) stride);
         if (!hd || hd[0] == 0xFF) return false;
         if (hd[0] != s->mapGroup || hd[1] != s->mapNum) continue;
+        int set = s->wildSet;
+        if (set < 0 || set > 7) set = 0;
+        if (set > 0) {
+            const uint8_t* alt = pd_rom_at(g, g->cfg->wildHeaders + (uint32_t) (h + set) * stride, (size_t) stride);
+            if (alt && alt[0] == hd[0] && alt[1] == hd[1]) hd = alt;
+        }
         read_table(g, u32(hd + 4), 0, 12, LAND_ODDS, out, 0);
         read_table(g, u32(hd + 8), 0, 5, WATER_ODDS, out, 1);
         read_table(g, u32(hd + 12), 0, 5, WATER_ODDS, out, 2);
-        read_table(g, u32(hd + 16), 0, 2, FISH_ODDS, out, 3);
-        read_table(g, u32(hd + 16), 2, 3, FISH_ODDS + 2, out, 4);
-        read_table(g, u32(hd + 16), 5, 5, FISH_ODDS + 5, out, 5);
+        read_table(g, u32(hd + fishAt), 0, 2, FISH_ODDS, out, 3);
+        read_table(g, u32(hd + fishAt), 2, 3, FISH_ODDS + 2, out, 4);
+        read_table(g, u32(hd + fishAt), 5, 5, FISH_ODDS + 5, out, 5);
         for (int m = 0; m < PD_WILD_METHODS; m++) {
             qsort(out->mons[m], (size_t) out->count[m], sizeof(struct pd_wild), cmp_wild);
         }

@@ -13,6 +13,7 @@
 
 #include "pd_battle.h"
 #include "pd_icon.h"
+#include "pd_lazarus.h"
 #include "pd_tables.h"
 #include "pd_ui_internal.h"
 
@@ -373,11 +374,6 @@ static void ball_row(struct pd_canvas* c, const struct pd_snapshot* s, int x, in
     }
 }
 
-static const uint32_t TYPE_COLOR[] = {
-    0xA8A878, 0xC03028, 0xA890F0, 0xA040A0, 0xE0C068, 0xB8A038, 0xA8B820, 0x705898, 0xB8B8D0, 0x68A090,
-    0xF08030, 0x6890F0, 0x78C850, 0xF8D030, 0xF85888, 0x98D8D8, 0x7038F8, 0x705848,
-};
-
 static void mult_text(int pct, char* buf, size_t len) {
     if (pct <= 0) snprintf(buf, len, "0x");
     else if (pct >= 400) snprintf(buf, len, "4x");
@@ -398,8 +394,7 @@ static void move_grid(struct pd_ui* ui, struct pd_canvas* c, const struct mon_vi
         int my = y + (i / 2) * (bh + gap);
         int move = you->moves[i];
         int pp = you->pp[i];
-        uint32_t frame = move && (unsigned) pd_move_type(move) < sizeof(TYPE_COLOR) / sizeof(TYPE_COLOR[0])
-            ? TYPE_COLOR[pd_move_type(move)] : 0x888888;
+        uint32_t frame = move ? pd_type_color(pd_move_type(move)) : 0x888888;
         bool usable = move && pp > 0;
         plat(ui, c, mx, my, bw, bh, usable ? 0xE8E8B0 : 0xC8C8A0, frame, usable ? HIT_MOVE + i : -1);
         if (!move) {
@@ -847,7 +842,13 @@ bool ui_battle_act(struct pd_ui* ui, int id) {
             ui->actionArg2 = index;
             ui->actionArg3 = berry;
             ui->actionArg4 = -1;
-            if (berry >= 0 || item_needs_mon(item)) ui->battlePick = 4;
+            bool needsMon = item_needs_mon(item);
+            // Lazarus item ids are not FireRed's: balls never ask for a target,
+            // and a held item from the items or berry pocket does.
+            if (pd_is_lazarus(ui->game)) {
+                needsMon = pocket == PD_POCKET_ITEMS || pocket == PD_POCKET_BERRIES;
+            }
+            if (berry >= 0 || needsMon) ui->battlePick = 4;
             else {
                 ui->action = PD_ACTION_BATTLE_ITEM;
                 ui->battlePick = 0;

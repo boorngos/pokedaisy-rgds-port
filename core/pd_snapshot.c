@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "pd_lazarus.h"
 #include "pd_tables.h"
 
 #define MON_SIZE 100
@@ -101,7 +102,15 @@ static void decode_name(const uint8_t* src, int maxLen, char* out, size_t outLen
 // DisplayPartyPokemonGender's rule that a Nidoran still named "NIDORAN♀" /
 // "NIDORAN♂" shows no mark (its name has one) - the app's withNativeGender.
 static enum pd_gender gender_of(const struct pd_mon* m, uint32_t personality) {
-    if (m->species == PD_SPECIES_EGG || m->species >= pd_gender_ratios_count) return PD_GENDER_NONE;
+    if (m->species == PD_SPECIES_EGG) return PD_GENDER_NONE;
+    if (pd_is_lazarus(pd_bound_game())) {
+        int ratio = pd_laz_gender_ratio(pd_bound_game(), m->species);
+        if (ratio == 255) return PD_GENDER_NONE;
+        if (ratio == 0) return PD_GENDER_MALE;
+        if (ratio == 254) return PD_GENDER_FEMALE;
+        return (int) (personality & 0xFF) < ratio ? PD_GENDER_FEMALE : PD_GENDER_MALE;
+    }
+    if (m->species >= pd_gender_ratios_count) return PD_GENDER_NONE;
     if ((m->species == 29 && !strcmp(m->nickname, "NIDORAN♀")) ||
         (m->species == 32 && !strcmp(m->nickname, "NIDORAN♂"))) {
         return PD_GENDER_NONE;
@@ -159,7 +168,9 @@ bool pd_decode_party_mon(const uint8_t* raw, struct pd_mon* m) {
     m->status = u32(raw + 0x50);
     // BoxPokemon +0x13 flags (isBadEgg, hasSpecies, isEgg): an egg shows as
     // SPECIES_EGG, like the party menu.
-    if (raw[0x13] & 0x04) m->species = PD_SPECIES_EGG;
+    if ((raw[0x13] & 0x04) || (pd_is_lazarus(pd_bound_game()) && m->species == PD_LAZ_EGG)) {
+        m->species = PD_SPECIES_EGG;
+    }
     decode_name(raw + 0x08, 10, m->nickname, sizeof(m->nickname));
     m->gender = gender_of(m, personality);
     return true;
@@ -205,8 +216,10 @@ static bool read_u32(pd_read_fn read, void* ctx, uint32_t addr, uint32_t* out) {
 }
 
 void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn read, void* ctx) {
+    pd_bind_game(g);
     memset(s, 0, sizeof(*s));
     s->money = -1;
+    s->gender = -1;
     const struct pd_config* cfg = g->cfg;
     if (!cfg) return;
     s->valid = true;
@@ -304,7 +317,6 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
             }
         }
     }
-    s->gender = -1;
     if (saveOk) read_save_fields(s, cfg, read, ctx, sb1, sb2);
 
     // --- the map: gMapHeader's layout size and type ---
@@ -365,6 +377,29 @@ static void read_save_fields(struct pd_snapshot* s, const struct pd_config* cfg,
     uint8_t gender = 0xFF;
     if (read(ctx, sb2 + SAVEBLOCK2_GENDER_OFF, &gender, 1)) s->gender = gender <= 1 ? gender : -1;
 
+    // Lazarus keeps a 129-byte seen / caught pair in SaveBlock1 (national 1 is
+    // bit 0) and the same National Dex magic Emerald uses.
+    if (pd_is_lazarus(pd_bound_game())) {
+        uint8_t seen[PD_LAZ_DEX_BYTES], caught[PD_LAZ_DEX_BYTES], magic = 0;
+        if (read(ctx, sb1 + 0x32A8, seen, sizeof(seen)) && read(ctx, sb1 + 0x3329, caught, sizeof(caught))) {
+            s->dexOk = true;
+            memcpy(s->dexSeen, seen, sizeof(seen));
+            memcpy(s->dexCaught, caught, sizeof(caught));
+        }
+        if (read(ctx, sb2 + 0x1A, &magic, 1)) s->dexNational = magic == 0xDA;
+        uint8_t hour = 0xFF;
+        if (read(ctx, 0x030039AA, &hour, 1) && hour <= 23) {
+            // Altering Cave picks its set from a var. Every other outdoor map
+            // uses the next header at night, except group 24 and map 106.
+            if (s->posOk && s->mapGroup == 24 && s->mapNum == 106) {
+                uint8_t var[2];
+                if (read(ctx, sb1 + 0x1414 + 0x3E * 2, var, 2)) s->wildSet = u16(var);
+            } else if (s->posOk && s->mapGroup != 24 && s->mapNum != 106 && (hour < 7 || hour > 19)) {
+                s->wildSet = 1;
+            }
+        }
+    }
+
     // struct Pokedex at SaveBlock2+0x18: owned at +0x10, seen at +0x44.
     // Retail only. The three copies are 52 bytes; reading more would pull in
     // the bytes that follow them.
@@ -384,6 +419,8 @@ static void read_save_fields(struct pd_snapshot* s, const struct pd_config* cfg,
     // bitfield (SaveBlock1 +0x310 / +0x38D, 1000 bits, no second copy).
     // Retail leaves a real checksum on every party Pokémon; CFRU leaves 0
     // and hasSpecies set, which is how a retail save is told apart.
+    if (pd_is_lazarus(pd_bound_game())) return;
+
     bool retailSeen = false;
     for (int i = 0; i < PD_DEX_RETAIL; i++) {
         if (s->dexSeen[i]) retailSeen = true;
@@ -451,11 +488,23 @@ static const char* item_entry(const char* const* t, int n, int item) {
 }
 
 const char* pd_item_name(const struct pd_game* g, int item) {
+    if (pd_is_lazarus(g)) {
+        static char buf[4][28];
+        static int slot;
+        char* out = buf[slot++ & 3];
+        if (!pd_laz_item_name(g, item, out, 28)) out[0] = 0;
+        return out;
+    }
     if (g->kind == PD_GAME_EMERALD) return item_entry(pd_item_names_emerald, pd_item_names_emerald_count, item);
     return item_entry(pd_item_names_firered, pd_item_names_firered_count, item);
 }
 
 const char* pd_item_description(const struct pd_game* g, int item) {
+    if (pd_is_lazarus(g)) {
+        static char buf[200];
+        if (!pd_laz_item_desc(g, item, buf, sizeof(buf))) buf[0] = 0;
+        return buf;
+    }
     if (g->kind == PD_GAME_EMERALD) return item_entry(pd_item_desc_emerald, pd_item_desc_emerald_count, item);
     return item_entry(pd_item_desc_firered, pd_item_desc_firered_count, item);
 }
@@ -472,6 +521,7 @@ const char* pd_pocket_name(int pocket) {
 }
 
 const char* pd_mapsec_name(const struct pd_game* g, int mapsec) {
+    if (pd_is_lazarus(g)) return pd_laz_mapsec_name(g, mapsec);
     // Emerald's map sections start at 0 (Littleroot); FireRed's Kanto ones at 88.
     const char* const* t = g->kind == PD_GAME_EMERALD ? pd_mapsec_emerald : pd_mapsec_firered;
     int n = g->kind == PD_GAME_EMERALD ? pd_mapsec_emerald_count : pd_mapsec_firered_count;

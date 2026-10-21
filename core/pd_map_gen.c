@@ -61,6 +61,10 @@ const struct pd_blob_sig pd_blob_sigs[PD_BLOB_COUNT] = {
     [PD_EM_FONT_NORMAL] = { false, 32768, 0xA7757FEEu, 314, 0x2FD9CE0079AD4F11ull, 0xE1B0, PD_BLOB_EMERALD },
     [PD_EM_FONT_NORMAL_WIDTHS] = { false, 512, 0x002DEBCBu, 38, 0xD417A07C815713A0ull, 0xDFE0, PD_BLOB_EMERALD },
     [PD_CARD_STAR_PAL] = { false, 32, 0xB6380DF6u, 0, 0xF6817DDB3D14BFE1ull, 0xD9B3, PD_BLOB_FIRERED | PD_BLOB_EMERALD },
+    // RomArt LZ_REGION_* from Lazarus v2.0 (sha1 7dcdc7e2).
+    [PD_LZ_REGION_GFX] = { true, 16384, 0xE19B0CBDu, 0, 0xCBBF634D2ACD727Aull, 0x7D56, PD_BLOB_LAZARUS },
+    [PD_LZ_REGION_PAL] = { false, 64, 0x41B6B3C6u, 0, 0x7B0104CF13C24682ull, 0x875D, PD_BLOB_LAZARUS },
+    [PD_LZ_REGION_MAP] = { true, 4096, 0xC0BC8D2Fu, 0, 0x396B6FD669E369AFull, 0x5FD1, PD_BLOB_LAZARUS },
 };
 
 static const unsigned char firered_layout0_0[330] = {

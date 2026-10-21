@@ -219,6 +219,12 @@ static const struct pd_config LAZARUS = {
     .monPalIdxMask = 0x07,
     .bagPockets = 0x0200B0D8,
     .bagOrder = { PD_POCKET_ITEMS, PD_POCKET_BALLS, PD_POCKET_TMHM, PD_POCKET_BERRIES, PD_POCKET_KEY },
+    // ILIOS dex (430) and gWildMonHeaders. Names, the region map and the dex
+    // entry bytes are read from the ROM in pd_lazarus.c.
+    .regionalOrder = 0x088DFC5C,
+    .regionalCount = 430,
+    .regionName = "ILIOS",
+    .wildHeaders = 0x08E67010,
     .battleMonSize = 0x60,
     .battleMoveOff = 0x0C,
     .battleType1 = 0x22,

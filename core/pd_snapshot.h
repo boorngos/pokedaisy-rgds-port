@@ -46,8 +46,8 @@ struct pd_battle_mon {
 #define PD_POS_OPPONENT_LEFT 1
 
 // A pocket's slots: every pocket of FireRed's and Emerald's bag holds at most 64.
-#define PD_POCKET_SLOTS 64
-#define PD_NATIONAL_COUNT 1025
+#define PD_POCKET_SLOTS 80
+#define PD_NATIONAL_COUNT 1028
 // Retail FireRed/Emerald keep 52 bytes (386 species). CFRU hacks keep a
 // 1000-bit seen/caught pair instead, so the buffers cover both.
 #define PD_DEX_BYTES 129
@@ -92,6 +92,9 @@ struct pd_snapshot {
     int x, y, mapGroup, mapNum;
     int mapW, mapH, mapType;
     int gender; // SaveBlock2.playerGender: 0 boy, 1 girl, -1 unknown
+    // Lazarus: which of this map's back-to-back wild headers to read (night,
+    // or Altering Cave's var). 0 everywhere else.
+    int wildSet;
 
     // POKéDEX: by national number - 1, a bit each (the app's
     // readPokedexState: seen only when SaveBlock2's flags and both of
