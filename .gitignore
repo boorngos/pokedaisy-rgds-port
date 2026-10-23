@@ -14,5 +14,4 @@ CMakeUserPresets.json
 # Local RG DS build and deploy helpers. New ones belong in scripts/
 # (already ignored) or must be added here before they are committed.
 scripts/
-ports/PokeDaisy.sh
-.cursor/rules/rgds-deploy.mdc
+.cursor/

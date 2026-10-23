@@ -53,19 +53,12 @@ Default: `root@192.168.1.88:22`. Altrimenti `RGDS_HOST`, `RGDS_PORT`, `RGDS_USER
 
 L’RG DS può avviare Linux da microSD senza cancellare Android (documentazione Anbernic). I due pannelli DSI 640×480 restano due output.
 
-1. Compila **aarch64** (sul dispositivo, o in cross-compile):
-
-   ```sh
-   cmake -S . -B build-aarch64 -DCMAKE_BUILD_TYPE=Release \
-     -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-     -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
-   cmake --build build-aarch64 -j$(nproc)
-   ```
+1. Compila **aarch64** contro la `libSDL2` e la libc di quel firmware (glibc della versione giusta, o musl). La procedura è in [docs/building-rgds.md](docs/building-rgds.md). Il binario è `build-aarch64/pokedaisy`.
 
 2. Copia nella cartella Ports (Rocknix / Anbernic Linux), per esempio `/roms/ports/pokedaisy/`:
 
    - `pokedaisy` (il binario)
-   - `PokeDaisy.sh` (da `ports/`)
+   - `PokeDaisy.sh` (launcher in [docs/building-rgds.md](docs/building-rgds.md))
    - i tuoi `.gba` o `.zip` in `roms/`
 
 3. Avvio: `PokeDaisy.sh`. Con due display usa `--layout dual`; una sola framebuffer alta 960 px usa `--layout stacked`. `auto` sceglie da solo.
