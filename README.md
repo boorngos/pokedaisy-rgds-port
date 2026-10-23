@@ -1,5 +1,9 @@
 # PokeDaisy Linux (Anbernic RG DS)
 
+## ❗Disclaimer❗
+This project has been built using **AI assistance**. If you deprecate the use of AI and, legitimately, do not want to forage in any way AI companies, don't support this project. 
+
+---
 Linux port of [PokeDaisy](https://github.com/lidor30/pokedaisy) for the **Anbernic RG DS**: two 4" IPS screens at **640×480**, Rockchip RK3568, Android 14 *or* 64-bit Linux.
 
 The GBA game runs on the **top** panel (libmgba 0.10.5). The live **companion** sits on the **bottom** one: party, bag, battle, map, Pokédex, guide, and trainer card, in the FireRed menu style. Same portable C core as the 3DS version of PokeDaisy.
