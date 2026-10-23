@@ -14,7 +14,7 @@ Fan project, GPL-3. Not affiliated with Nintendo, Game Freak, The Pokémon Compa
 |---|---|
 | Platform | 64-bit Linux (x86_64 on a PC, aarch64 on the RG DS) |
 | Screens | Auto: two displays = fullscreen on each; otherwise a 640×960 window (game on top, companion below) |
-| Games | Any `.gba`, including one packed in a `.zip`. The companion reads English **FireRed / LeafGreen (rev 0 and 1)**, **Emerald**, and **Lazarus v2.0**. |
+| Games | Any `.gba`, including one packed in a `.zip`. The companion reads English **FireRed / LeafGreen (rev 0 and 1)**, **Emerald**, **Lazarus v2.0**, and the GBA hacks upstream PokeDaisy names (Unbound, Radical Red, Gaia, Emerald Rogue, and the rest of that GBA list). GB, GBC, DS, Ruby and Sapphire are not read by this build. |
 | List | On the bottom screen. The **SETTINGS** gear (or Y) opens appearance, HUD, battle buttons, shader, and theme. |
 
 This is not a recompile of the Android app (Kotlin / Compose). It is an SDL2 host around the C core already written for two screens.

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "pd_lazarus.h"
+#include "pd_romtables.h"
 #include "pd_tables.h"
 
 #define MON_SIZE 100
@@ -103,8 +104,16 @@ static void decode_name(const uint8_t* src, int maxLen, char* out, size_t outLen
 // "NIDORAN♂" shows no mark (its name has one) - the app's withNativeGender.
 static enum pd_gender gender_of(const struct pd_mon* m, uint32_t personality) {
     if (m->species == PD_SPECIES_EGG) return PD_GENDER_NONE;
-    if (pd_is_lazarus(pd_bound_game())) {
-        int ratio = pd_laz_gender_ratio(pd_bound_game(), m->species);
+    const struct pd_game* bound = pd_bound_game();
+    if (pd_is_lazarus(bound)) {
+        int ratio = pd_laz_gender_ratio(bound, m->species);
+        if (ratio == 255) return PD_GENDER_NONE;
+        if (ratio == 0) return PD_GENDER_MALE;
+        if (ratio == 254) return PD_GENDER_FEMALE;
+        return (int) (personality & 0xFF) < ratio ? PD_GENDER_FEMALE : PD_GENDER_MALE;
+    }
+    if (bound && bound->rt) {
+        int ratio = pd_rt_gender(bound, m->species);
         if (ratio == 255) return PD_GENDER_NONE;
         if (ratio == 0) return PD_GENDER_MALE;
         if (ratio == 254) return PD_GENDER_FEMALE;
@@ -155,10 +164,14 @@ bool pd_decode_party_mon(const uint8_t* raw, struct pd_mon* m) {
     } else {
         return false;
     }
+    const struct pd_game* bound = pd_bound_game();
+    const struct pd_config* pcfg = bound ? bound->cfg : NULL;
     m->species = u16(data + off[0]);
+    if (pcfg && pcfg->speciesMask) m->species = (uint16_t) (m->species & pcfg->speciesMask);
     if (m->species == 0 || m->species > 3000) return false;
     for (int i = 0; i < PD_NUM_MOVES; i++) {
         m->moves[i] = u16(data + off[1] + i * 2);
+        if (pcfg && pcfg->moveMask) m->moves[i] = (uint16_t) (m->moves[i] & pcfg->moveMask);
         m->pp[i] = data[off[1] + 8 + i];
     }
     m->personality = personality;
@@ -168,8 +181,12 @@ bool pd_decode_party_mon(const uint8_t* raw, struct pd_mon* m) {
     m->status = u32(raw + 0x50);
     // BoxPokemon +0x13 flags (isBadEgg, hasSpecies, isEgg): an egg shows as
     // SPECIES_EGG, like the party menu.
-    if ((raw[0x13] & 0x04) || (pd_is_lazarus(pd_bound_game()) && m->species == PD_LAZ_EGG)) {
-        m->species = PD_SPECIES_EGG;
+    {
+        const struct pd_rt_profile* rt = bound ? pd_rt_get(bound) : NULL;
+        if ((raw[0x13] & 0x04) || (pd_is_lazarus(bound) && m->species == PD_LAZ_EGG) ||
+            (rt && rt->egg && m->species == rt->egg)) {
+            m->species = PD_SPECIES_EGG;
+        }
     }
     decode_name(raw + 0x08, 10, m->nickname, sizeof(m->nickname));
     m->gender = gender_of(m, personality);
@@ -182,7 +199,8 @@ static int off_or(int v, int fallback) {
 
 static void decode_battle_mon(const uint8_t* raw, struct pd_battle_mon* b, const struct pd_config* cfg) {
     memset(b, 0, sizeof(*b));
-    b->species = u16(raw);
+    b->species = u16(raw + cfg->battleSpeciesOff);
+    if (cfg->speciesMask) b->species = (uint16_t) (b->species & cfg->speciesMask);
     if (!b->species || b->species > 4096) return;
     int moves = off_or(cfg->battleMoveOff, 0x0C);
     int pp = off_or(cfg->battlePp, 0x24);
@@ -194,6 +212,7 @@ static void decode_battle_mon(const uint8_t* raw, struct pd_battle_mon* b, const
     int status = off_or(cfg->battleStatus, 0x4C);
     for (int i = 0; i < PD_NUM_MOVES; i++) {
         b->moves[i] = u16(raw + moves + i * 2);
+        if (cfg->moveMask) b->moves[i] = (uint16_t) (b->moves[i] & cfg->moveMask);
         b->pp[i] = raw[pp + i];
     }
     b->type1 = raw[type1];
@@ -202,6 +221,25 @@ static void decode_battle_mon(const uint8_t* raw, struct pd_battle_mon* b, const
     b->level = raw[level];
     b->maxHp = u16(raw + maxHp);
     b->status = u32(raw + status);
+}
+
+// 0 when the party struct is not the retail 100-byte encrypted layout.
+static int live_stride(const struct pd_config* cfg) {
+    int stride = cfg->monStride ? cfg->monStride : MON_SIZE;
+    if (stride < 0x5A || stride > 160) return 0;
+    return stride;
+}
+
+static void read_party(struct pd_mon* dest, int* count, const struct pd_config* cfg, pd_read_fn read, void* ctx,
+                       uint32_t addr, int n) {
+    int stride = live_stride(cfg);
+    if (!stride || !addr || n <= 0) return;
+    if (n > PD_PARTY_SIZE) n = PD_PARTY_SIZE;
+    uint8_t raw[PD_PARTY_SIZE * 160];
+    if (!read(ctx, addr, raw, (size_t) n * (size_t) stride)) return;
+    for (int i = 0; i < n; i++) {
+        if (pd_decode_party_mon(raw + (size_t) i * (size_t) stride, &dest[*count])) (*count)++;
+    }
 }
 
 static void read_save_fields(struct pd_snapshot* s, const struct pd_config* cfg, pd_read_fn read, void* ctx,
@@ -232,12 +270,7 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
     uint8_t count = 0;
     read(ctx, cfg->playerPartyCount, &count, 1);
     if (count == 0 || count > PD_PARTY_SIZE) count = PD_PARTY_SIZE;
-    uint8_t raw[PD_PARTY_SIZE * MON_SIZE];
-    if (read(ctx, cfg->playerParty, raw, count * MON_SIZE)) {
-        for (int i = 0; i < count; i++) {
-            if (pd_decode_party_mon(raw + i * MON_SIZE, &s->party[s->partyCount])) s->partyCount++;
-        }
-    }
+    read_party(s->party, &s->partyCount, cfg, read, ctx, cfg->playerParty, count);
 
     // --- battle --- (gMain.inBattle is bit 1 of the byte at +0x439)
     s->foeActive = s->foeNext = -1;
@@ -267,9 +300,15 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
     }
 
     // --- location ---
-    uint8_t sec = 0;
-    read(ctx, cfg->mapHeader + MAP_HEADER_MAPSEC_OFF, &sec, 1);
-    s->mapsec = sec;
+    if (cfg->mapSecWide) {
+        uint8_t wide[2] = { 0, 0 };
+        read(ctx, cfg->mapHeader + MAP_HEADER_MAPSEC_OFF, wide, 2);
+        s->mapsec = u16(wide);
+    } else {
+        uint8_t sec = 0;
+        read(ctx, cfg->mapHeader + MAP_HEADER_MAPSEC_OFF, &sec, 1);
+        s->mapsec = sec;
+    }
 
     // --- money: SaveBlock1.money XOR SaveBlock2.encryptionKey ---
     uint32_t sb1 = 0, sb2 = 0, money = 0, key = 0;
@@ -282,18 +321,21 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
     }
 
     // --- bag: quantities XOR the key's low half (readNativeBag) ---
-    uint8_t pockets[PD_POCKET_COUNT * 8];
-    if (haveKey && read(ctx, cfg->bagPockets, pockets, sizeof(pockets))) {
+    int pocketsN = cfg->bagPocketsN ? cfg->bagPocketsN : PD_POCKET_COUNT;
+    if (pocketsN > 10) pocketsN = 10;
+    uint8_t pockets[10 * 8];
+    if (haveKey && cfg->bagPockets && read(ctx, cfg->bagPockets, pockets, (size_t) pocketsN * 8)) {
         s->bagOk = true;
-        for (int p = 0; p < PD_POCKET_COUNT; p++) {
+        for (int p = 0; p < pocketsN; p++) {
             uint32_t slots = u32(pockets + p * 8);
             int capacity = pockets[p * 8 + 4];
+            if (cfg->bagOrder[p] >= PD_POCKET_COUNT) continue;
             if (!in_ram(slots) || capacity == 0) continue;
             if (capacity > PD_POCKET_SLOTS) capacity = PD_POCKET_SLOTS;
             uint8_t items[PD_POCKET_SLOTS * 4];
             if (!read(ctx, slots, items, (size_t) capacity * 4)) continue;
             struct pd_pocket_items* out = &s->bag[cfg->bagOrder[p]];
-            for (int i = 0; i < capacity; i++) {
+            for (int i = 0; i < capacity && out->count < PD_POCKET_SLOTS; i++) {
                 uint16_t id = u16(items + i * 4);
                 if (!id) continue;
                 out->items[out->count].id = id;
@@ -310,12 +352,7 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
         uint8_t saveCount = 0;
         read(ctx, sb1 + 0x34, &saveCount, 1);
         if (saveCount == 0 || saveCount > PD_PARTY_SIZE) saveCount = PD_PARTY_SIZE;
-        uint8_t saveParty[PD_PARTY_SIZE * MON_SIZE];
-        if (read(ctx, sb1 + 0x38, saveParty, saveCount * MON_SIZE)) {
-            for (int i = 0; i < saveCount; i++) {
-                if (pd_decode_party_mon(saveParty + i * MON_SIZE, &s->party[s->partyCount])) s->partyCount++;
-            }
-        }
+        read_party(s->party, &s->partyCount, cfg, read, ctx, sb1 + 0x38, saveCount);
     }
     if (saveOk) read_save_fields(s, cfg, read, ctx, sb1, sb2);
 
@@ -326,7 +363,7 @@ void pd_snapshot_read(struct pd_snapshot* s, const struct pd_game* g, pd_read_fn
     if (read_u32(read, ctx, cfg->mapHeader, &layout) && (in_ram(layout) || (layout >= 0x08000000 && layout < 0x0A000000)) &&
         read_u32(read, ctx, layout, &w) &&
         read_u32(read, ctx, layout + 4, &h) && w >= 1 && w <= 1024 && h >= 1 && h <= 1024 &&
-        read(ctx, cfg->mapHeader + MAP_HEADER_MAP_TYPE_OFF, &type, 1)) {
+        read(ctx, cfg->mapHeader + (cfg->mapSecWide ? 0x18 : MAP_HEADER_MAP_TYPE_OFF), &type, 1)) {
         s->mapW = (int) w;
         s->mapH = (int) h;
         s->mapType = type;
@@ -495,6 +532,13 @@ const char* pd_item_name(const struct pd_game* g, int item) {
         if (!pd_laz_item_name(g, item, out, 28)) out[0] = 0;
         return out;
     }
+    if (g->rt) {
+        static char buf[4][28];
+        static int slot;
+        char* out = buf[slot++ & 3];
+        if (!pd_rt_item(g, item, out, 28)) out[0] = 0;
+        return out;
+    }
     if (g->kind == PD_GAME_EMERALD) return item_entry(pd_item_names_emerald, pd_item_names_emerald_count, item);
     return item_entry(pd_item_names_firered, pd_item_names_firered_count, item);
 }
@@ -503,6 +547,11 @@ const char* pd_item_description(const struct pd_game* g, int item) {
     if (pd_is_lazarus(g)) {
         static char buf[200];
         if (!pd_laz_item_desc(g, item, buf, sizeof(buf))) buf[0] = 0;
+        return buf;
+    }
+    if (g->rt) {
+        static char buf[200];
+        if (!pd_rt_item_desc(g, item, buf, sizeof(buf))) buf[0] = 0;
         return buf;
     }
     if (g->kind == PD_GAME_EMERALD) return item_entry(pd_item_desc_emerald, pd_item_desc_emerald_count, item);
@@ -522,6 +571,7 @@ const char* pd_pocket_name(int pocket) {
 
 const char* pd_mapsec_name(const struct pd_game* g, int mapsec) {
     if (pd_is_lazarus(g)) return pd_laz_mapsec_name(g, mapsec);
+    if (g->rt && pd_rt_has_map(g)) return pd_rt_mapsec(g, mapsec);
     // Emerald's map sections start at 0 (Littleroot); FireRed's Kanto ones at 88.
     const char* const* t = g->kind == PD_GAME_EMERALD ? pd_mapsec_emerald : pd_mapsec_firered;
     int n = g->kind == PD_GAME_EMERALD ? pd_mapsec_emerald_count : pd_mapsec_firered_count;
@@ -542,11 +592,8 @@ const char* pd_status_label(uint32_t status) {
 // The trainer's party and which of it is out / next (readNativeTelemetry's
 // enemyParty / enemyActive / enemyNext, then SnapshotView's rule for next).
 static void read_foes(struct pd_snapshot* s, const struct pd_config* cfg, pd_read_fn read, void* ctx, int foeBattler) {
-    uint8_t raw[PD_PARTY_SIZE * MON_SIZE];
-    if (!read(ctx, cfg->enemyParty, raw, sizeof(raw))) return;
-    for (int i = 0; i < PD_PARTY_SIZE; i++) {
-        if (pd_decode_party_mon(raw + i * MON_SIZE, &s->foes[s->foeCount])) s->foeCount++;
-    }
+    if (!cfg->enemyParty) return;
+    read_party(s->foes, &s->foeCount, cfg, read, ctx, cfg->enemyParty, PD_PARTY_SIZE);
     if (!s->foeCount || foeBattler < 0 || !cfg->battlerPartyIndexes) return;
     uint8_t idx[2];
     if (read(ctx, cfg->battlerPartyIndexes + (uint32_t) foeBattler * 2, idx, 2)) {

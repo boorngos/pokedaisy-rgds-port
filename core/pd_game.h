@@ -49,7 +49,9 @@ struct pd_config {
     // gBagPockets: five {slots pointer, capacity} pairs, 8 bytes apart;
     // bagOrder[i] is the pocket (PD_POCKET_*) the game keeps at index i.
     uint32_t bagPockets;
-    uint8_t bagOrder[5];
+    // 0 = five pockets. Expansion bags have six to ten; bagOrder[i] is pocket i.
+    uint8_t bagPocketsN;
+    uint8_t bagOrder[10];
 
     // POKéDEX (the app's PokedexTables): ROM tables ...
     uint32_t dexEntries;       // gPokedexEntries, by national number
@@ -87,7 +89,17 @@ struct pd_config {
     int stickerVar;
     int frontierSymbolFlag;
     uint32_t museumWinnersOff, frontierBpOff; // in SaveBlock1 / SaveBlock2
+    // 0 = a retail 100-byte Pokémon / a full species id. Expansion packs
+    // species:11 next to other bits, and a few hacks grow the struct.
+    uint16_t monStride;
+    uint16_t speciesMask, moveMask;
+    // gMapHeader.regionMapSectionId is a u16 (mapType then sits at +0x18).
+    uint8_t mapSecWide;
+    // struct BattlePokemon species field. 0 = the first u16.
+    int battleSpeciesOff;
 };
+
+struct pd_rt_profile;
 
 enum pd_card_style { PD_CARD_NONE, PD_CARD_KANTO, PD_CARD_HOENN };
 
@@ -113,6 +125,9 @@ struct pd_game {
     const uint8_t* rom;
     size_t romSize;
     unsigned loadId; // new on every pd_game_detect (see pd_rom_id)
+    // Names, types, items and the region list read from this ROM. NULL = the
+    // bundled FireRed / Emerald tables.
+    const struct pd_rt_profile* rt;
 };
 
 // Which ROM the tabs' caches were built from: 0 = none, else new for every
@@ -130,6 +145,7 @@ void pd_game_detect(struct pd_game* g, const uint8_t* header, size_t romSize);
 // A BPEE image larger than retail Emerald. hex is the lowercase SHA-1 of the
 // whole file. A known hack replaces the retail RAM map; anything else is
 // left on Emerald's addresses.
-void pd_game_apply_sha1(struct pd_game* g, const char* hex);
+// True when hex is a hack this port has tables for (and g was updated).
+bool pd_game_apply_sha1(struct pd_game* g, const char* hex);
 
 #endif

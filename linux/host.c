@@ -1529,14 +1529,10 @@ static bool run_game(const char* file) {
     rom->seek(rom, 0, SEEK_SET);
     struct pd_game game;
     pd_game_detect(&game, header, (size_t) rom->size(rom));
-    if (!strcmp(game.code, "BPEE") && rom->size(rom) > 0x1000000) {
-        char hex[41];
-        if (pd_sha1_file(loadPath, hex)) {
-            pd_game_apply_sha1(&game, hex);
-            if (!game.title || strcmp(game.title, "Pokémon Lazarus"))
-                fprintf(stderr, "pokedaisy: large Emerald hack %s uses retail addresses\n", hex);
-        }
-    }
+    char hex[41] = { 0 };
+    bool known = pd_sha1_file(loadPath, hex) && pd_game_apply_sha1(&game, hex);
+    if (!known && !strcmp(game.code, "BPEE") && rom->size(rom) > 0x1000000)
+        fprintf(stderr, "pokedaisy: large Emerald hack %s uses retail addresses\n", hex[0] ? hex : file);
 
     struct mCore* core = mCoreFindVF(rom);
     if (!core || !core->init(core)) {

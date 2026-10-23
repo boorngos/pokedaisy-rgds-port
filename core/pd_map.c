@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "pd_lazarus.h"
+#include "pd_romtables.h"
 
 // --- drawing (RomArt's screen / emeraldRegionMap / sprite) ---
 
@@ -153,11 +154,40 @@ static void laz_ready(const struct pd_game* g) {
     lazReady = pd_rom_id(g);
 }
 
+static struct pd_mapsec_rect rtRects[256];
+static uint8_t rtGrid[28 * 15];
+static unsigned rtReady;
+static struct pd_region_layout rtLayout;
+
+static bool rt_map(const struct pd_game* g) {
+    if (!g || !g->rt || pd_is_lazarus(g)) return false;
+    const struct pd_rt_profile* rt = pd_rt_get(g);
+    if (!rt) return false;
+    if (rtReady != pd_rom_id(g)) {
+        rtReady = pd_rom_id(g);
+        rtLayout.w = 0;
+        if (pd_rt_map_prepare(g, rtRects, 256, rtGrid)) {
+            rtLayout.offX = rt->map_ox;
+            rtLayout.offY = rt->map_oy;
+            rtLayout.w = rt->map_w;
+            rtLayout.h = rt->map_h;
+            rtLayout.none = (uint8_t) rt->map_none;
+            rtLayout.layers[0] = rtGrid;
+            rtLayout.layers[1] = NULL;
+        }
+    }
+    return rtLayout.w > 0;
+}
+
 static const struct pd_region_layout* layouts(const struct pd_game* g, int* n) {
     if (pd_is_lazarus(g)) {
         laz_ready(g);
         *n = 1;
         return &lazLayout;
+    }
+    if (rt_map(g)) {
+        *n = 1;
+        return &rtLayout;
     }
     if (g->kind == PD_GAME_EMERALD) {
         *n = pd_layouts_emerald_count;
@@ -172,6 +202,7 @@ static const struct pd_mapsec_rect* rect_of(const struct pd_game* g, int mapsec)
         laz_ready(g);
         return mapsec >= 0 && mapsec < 256 ? &lazRects[mapsec] : NULL;
     }
+    if (rt_map(g)) return mapsec >= 0 && mapsec < 256 ? &rtRects[mapsec] : NULL;
     if (g->kind == PD_GAME_EMERALD) {
         return mapsec >= 0 && mapsec < pd_mapsec_rects_emerald_count ? &pd_mapsec_rects_emerald[mapsec] : NULL;
     }
@@ -258,6 +289,10 @@ bool pd_map_player_tile(const struct pd_game* g, const struct pd_snapshot* s, in
 
 const char* pd_map_page_name(const struct pd_game* g, int page) {
     if (pd_is_lazarus(g)) return "ILIOS";
+    if (g->rt) {
+        const struct pd_rt_profile* rt = pd_rt_get(g);
+        if (rt && rt->region) return rt->region;
+    }
     if (g->kind == PD_GAME_EMERALD) return "HOENN";
     static const char* const NAMES[PD_MAP_PAGES] = { "KANTO", "SEVII 1-3", "SEVII 4-5", "SEVII 6-7" };
     return page >= 0 && page < PD_MAP_PAGES ? NAMES[page] : "";

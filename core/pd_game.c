@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "pd_romtables.h"
+
 // NATIVE_FIRERED_REV0 / _REV1 share every RAM address and save offset below,
 // and LeafGreen's maps put each RAM global at FireRed's address for the same
 // revision (NATIVE_LEAFGREEN_REV0/1).
@@ -345,12 +347,15 @@ void pd_game_detect(struct pd_game* g, const uint8_t* header, size_t romSize) {
     (void) romSize;
 }
 
-void pd_game_apply_sha1(struct pd_game* g, const char* hex) {
-    if (!hex) return;
+bool pd_game_apply_sha1(struct pd_game* g, const char* hex) {
+    if (!g || !hex) return false;
     if (!strcmp(hex, "7dcdc7e280bc4631487e13dd37e6e0cea04adea6")) {
         g->kind = PD_GAME_EMERALD;
         g->title = "Pokémon Lazarus";
         g->cfg = &LAZARUS;
         g->unsupported = NULL;
+        g->rt = &pd_rt_lazarus;
+        return true;
     }
+    return pd_hack_apply(g, hex, &FIRERED_REV0_RAM_ONLY, &EMERALD);
 }
