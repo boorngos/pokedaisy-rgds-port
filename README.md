@@ -1,34 +1,34 @@
 # PokeDaisy Linux (Anbernic RG DS)
 
-Port Linux di [PokeDaisy](https://github.com/lidor30/pokedaisy) per l’**Anbernic RG DS**: due schermi IPS 4" **640×480**, Rockchip RK3568, Android 14 *o* Linux 64-bit.
+Linux port of [PokeDaisy](https://github.com/lidor30/pokedaisy) for the **Anbernic RG DS**: two 4" IPS screens at **640×480**, Rockchip RK3568, Android 14 *or* 64-bit Linux.
 
-Il gioco GBA gira sul pannello **superiore** (libmgba 0.10.5). Il **companion** live sta su quello **inferiore**: party, borsa, lotta, mappa, Pokédex, guida e scheda allenatore, nello stile menu di FireRed. Stesso core C portabile della versione 3DS di PokeDaisy.
+The GBA game runs on the **top** panel (libmgba 0.10.5). The live **companion** sits on the **bottom** one: party, bag, battle, map, Pokédex, guide, and trainer card, in the FireRed menu style. Same portable C core as the 3DS version of PokeDaisy.
 
 **Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy**
 
-Fan project, GPL-3. Non affiliato a Nintendo, Game Freak, The Pokémon Company o Anbernic. **Nessuna ROM o BIOS è inclusa.** Usa dump legali dei tuoi cartucce.
+Fan project, GPL-3. Not affiliated with Nintendo, Game Freak, The Pokémon Company, or Anbernic. **No ROM or BIOS is included.** Use legal dumps of your own cartridges.
 
-## Cosa gira oggi
+## What runs today
 
 | | |
 |---|---|
-| Piattaforma | Linux 64-bit (x86_64 per il PC, aarch64 sull’RG DS) |
-| Schermi | Auto: due display = fullscreen su ciascuno; altrimenti finestra 640×960 (gioco sopra, companion sotto) |
-| Giochi | Qualsiasi `.gba`, anche dentro uno `.zip`. Il companion legge **FireRed / LeafGreen (rev 0 e 1)**, **Emerald** inglese e **Lazarus v2.0**. |
-| Elenco | Sullo schermo basso. La rotella **SETTINGS** (o Y) apre aspetto, HUD, tasti lotta, shader e tema. |
+| Platform | 64-bit Linux (x86_64 on a PC, aarch64 on the RG DS) |
+| Screens | Auto: two displays = fullscreen on each; otherwise a 640×960 window (game on top, companion below) |
+| Games | Any `.gba`, including one packed in a `.zip`. The companion reads English **FireRed / LeafGreen (rev 0 and 1)**, **Emerald**, and **Lazarus v2.0**. |
+| List | On the bottom screen. The **SETTINGS** gear (or Y) opens appearance, HUD, battle buttons, shader, and theme. |
 
-Non è un recompile dell’app Android (Kotlin / Compose). È un host SDL2 intorno al core C già scritto per schermi doppi.
+This is not a recompile of the Android app (Kotlin / Compose). It is an SDL2 host around the C core already written for two screens.
 
 ## Build
 
-Dipendenze: CMake ≥ 3.16, un compilatore C, pthread. SDL2 e mGBA 0.10.5 vengono scaricati al configure se non sono già in `third_party/`.
+Dependencies: CMake ≥ 3.16, a C compiler, pthread. SDL2 and mGBA 0.10.5 are downloaded at configure time if they are not already in `third_party/`.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-### Con le tue ROM
+### With your ROMs
 
 ```sh
 mkdir -p ~/.local/share/pokedaisy/roms
@@ -36,72 +36,72 @@ cp "Pokemon - FireRed Version (USA, Europe) (Rev 1).gba" ~/.local/share/pokedais
 ./build/pokedaisy --layout window
 ```
 
-Oppure passa il file: `./build/pokedaisy /percorso/al/gioco.gba`.
+Or pass the file: `./build/pokedaisy /path/to/the/game.gba`.
 
-## Avvio via SSH (stessa Wi‑Fi)
+## Launch over SSH (same Wi-Fi)
 
-Da un PC **nella stessa rete locale** dell’RG DS (un cloud agent non raggiunge `192.168.x.x`):
+From a PC **on the same LAN** as the RG DS (a cloud agent cannot reach `192.168.x.x`):
 
 ```sh
-sudo apt install sshpass   # se manca
-SSHPASS='la-tua-password-ssh' ./scripts/run-on-rgds.sh
+sudo apt install sshpass   # if it is missing
+SSHPASS='your-ssh-password' ./scripts/run-on-rgds.sh
 ```
 
-Default: `root@192.168.1.88:22`. Altrimenti `RGDS_HOST`, `RGDS_PORT`, `RGDS_USER`. Lo script copia i sorgenti, compila **sul dispositivo** (servono gcc/cmake) e lancia la demo sui due schermi.
+Default: `root@192.168.1.88:22`. Otherwise set `RGDS_HOST`, `RGDS_PORT`, `RGDS_USER`. The script copies the sources, builds **on the device** (gcc and cmake are required), and starts the demo on both screens.
 
-## Installazione sull’RG DS (Linux)
+## Install on the RG DS (Linux)
 
-L’RG DS può avviare Linux da microSD senza cancellare Android (documentazione Anbernic). I due pannelli DSI 640×480 restano due output.
+The RG DS can boot Linux from a microSD without erasing Android (see Anbernic's documentation). The two 640×480 DSI panels stay two outputs.
 
-1. Compila **aarch64** contro la `libSDL2` e la libc di quel firmware (glibc della versione giusta, o musl). La procedura è in [docs/building-rgds.md](docs/building-rgds.md). Il binario è `build-aarch64/pokedaisy`.
+1. Build **aarch64** against that firmware's `libSDL2` and libc (the matching glibc version, or musl). The procedure is in [docs/building-rgds.md](docs/building-rgds.md). The binary is `build-aarch64/pokedaisy`.
 
-2. Copia nella cartella Ports (Rocknix / Anbernic Linux), per esempio `/roms/ports/pokedaisy/`:
+2. Copy it into the Ports folder (Rocknix / Anbernic Linux), for example `/roms/ports/pokedaisy/`:
 
-   - `pokedaisy` (il binario)
+   - `pokedaisy` (the binary)
    - `PokeDaisy.sh` (launcher in [docs/building-rgds.md](docs/building-rgds.md))
-   - i tuoi `.gba` o `.zip` in `roms/`
+   - your `.gba` or `.zip` files in `roms/`
 
-3. Avvio: `PokeDaisy.sh`. Con due display usa `--layout dual`; una sola framebuffer alta 960 px usa `--layout stacked`. `auto` sceglie da solo.
+3. Start it with `PokeDaisy.sh`. Two displays use `--layout dual`; a single framebuffer 960 px tall uses `--layout stacked`. `auto` picks on its own.
 
-Saves: `~/.local/share/pokedaisy/saves/` (o `$POKEDAISY_HOME/saves`), formato `.sav` come mGBA / RetroArch. Backup automatico prima di ogni partita.
+Saves: `~/.local/share/pokedaisy/saves/` (or `$POKEDAISY_HOME/saves`), `.sav` files in the same format as mGBA / RetroArch. An automatic backup is taken before each session.
 
-## Comandi
+## Controls
 
-| RG DS / pad | Tastiera | Azione |
+| RG DS / pad | Keyboard | Action |
 |---|---|---|
-| D-pad, stick L | Frecce | D-pad GBA |
-| A (est) / B (sud) | Z / X | A / B GBA (layout Nintendo, default) |
-| Start / Select | Invio / Backspace | Start / Select |
-| L / R | Q / E | Spalle GBA |
-| X | Tab | Scheda successiva del companion |
-| Y | Esc | Indietro nel companion. Nell'elenco apre SETTINGS |
-| L3 | F1 | Menu rapido (PC, avanti veloce, salva, zoom, schede) |
-| R3 | F2 | Cicla ORIGINAL / FIT / STRETCH |
-| R2 | Space | Fast-forward tenuto |
-| Touch schermo basso | Mouse | Tocchi del companion |
-| X+Y tenuti 1 s | | Esce dal gioco (con salvataggio) |
+| D-pad, left stick | Arrows | GBA D-pad |
+| A (east) / B (south) | Z / X | GBA A / B (Nintendo layout, the default) |
+| Start / Select | Enter / Backspace | Start / Select |
+| L / R | Q / E | GBA shoulders |
+| X | Tab | Next companion tab |
+| Y | Esc | Back in the companion. On the list, opens SETTINGS |
+| L3 | F1 | Quick menu (PC, fast-forward, save, zoom, tabs) |
+| R3 | F2 | Cycle ORIGINAL / FIT / STRETCH |
+| R2 | Space | Fast-forward while held |
+| Bottom-screen touch | Mouse | Companion touches |
+| X+Y held for 1 s | | Leave the game (and save) |
 | | F11 | Fullscreen |
 
-`--xbox` inverte A/B se usi un pad Xbox sul PC.
+`--xbox` swaps A/B if you use an Xbox pad on a PC.
 
-## Opzioni
+## Options
 
 ```
 pokedaisy [--layout auto|stacked|dual|window]
           [--home DIR] [--roms DIR]
-          [--demo firered|emerald|battle]   # solo fixture, non in elenco
-          # i .zip in --roms vengono aperti come i .gba
+          [--demo firered|emerald|battle]   # fixtures only, not in the list
+          # .zip files in --roms are opened the same way as .gba
           [--shot file.png]
           [--nintendo | --xbox]
           [rom.gba]
 ```
 
-`--shot` disegna un fotogramma dual-screen e esce (utile senza display).
+`--shot` draws one dual-screen frame and exits (useful without a display).
 
-## Licenza
+## License
 
-GNU GPL v3, con il termine aggiuntivo di PokeDaisy: chi distribuisce questo lavoro deve mantenere il credito
+GNU GPL v3, with PokeDaisy's additional term: anyone who distributes this work must keep the credit
 
 **Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy**
 
-in NOTICE, README e nella schermata crediti. Dettagli in [NOTICE](NOTICE) e [LICENSE](LICENSE).
+in NOTICE, the README, and the credits screen. Details are in [NOTICE](NOTICE) and [LICENSE](LICENSE).
